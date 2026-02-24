@@ -20,6 +20,15 @@ class TradeCreate(BaseModel):
     amount: str  # 金额
 
 
+class TradeUpdate(BaseModel):
+    trade_type: Optional[str] = None
+    trade_date: Optional[str] = None
+    confirm_date: Optional[str] = None
+    confirm_shares: Optional[str] = None
+    confirm_net_value: Optional[str] = None
+    amount: Optional[str] = None
+
+
 @router.get("")
 async def get_trades(
     fund_code: Optional[str] = None,
@@ -44,6 +53,26 @@ async def add_trade(trade: TradeCreate):
             confirm_net_value=Decimal(trade.confirm_net_value) if trade.confirm_net_value else None,
             amount=Decimal(trade.amount)
         )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/{trade_id}")
+async def update_trade(trade_id: int, trade: TradeUpdate):
+    """更新交易记录"""
+    try:
+        result = FundService.update_trade(
+            trade_id=trade_id,
+            trade_type=trade.trade_type.upper() if trade.trade_type else None,
+            trade_date=date.fromisoformat(trade.trade_date) if trade.trade_date else None,
+            confirm_date=date.fromisoformat(trade.confirm_date) if trade.confirm_date else None,
+            confirm_shares=Decimal(trade.confirm_shares) if trade.confirm_shares else None,
+            confirm_net_value=Decimal(trade.confirm_net_value) if trade.confirm_net_value else None,
+            amount=Decimal(trade.amount) if trade.amount else None
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="交易记录不存在")
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

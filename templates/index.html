@@ -308,6 +308,49 @@
         </div>
     </div>
 
+    <!-- 编辑交易弹窗 -->
+    <div id="edit-trade-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>编辑交易记录</h3>
+                <span class="close" onclick="closeModal('edit-trade-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>交易类型</label>
+                    <select id="edit-trade-type">
+                        <option value="BUY">买入</option>
+                        <option value="SELL">卖出</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>购买时间</label>
+                    <input type="date" id="edit-trade-date">
+                </div>
+                <div class="form-group">
+                    <label>确认时间</label>
+                    <input type="date" id="edit-confirm-date">
+                </div>
+                <div class="form-group">
+                    <label>金额（元）</label>
+                    <input type="number" step="0.01" id="edit-trade-amount" placeholder="请输入成交金额">
+                </div>
+                <div class="form-group">
+                    <label>确认净值</label>
+                    <input type="number" step="0.0001" id="edit-confirm-net-value" placeholder="确认日基金净值">
+                </div>
+                <div class="form-group">
+                    <label>确认份额</label>
+                    <input type="number" step="0.01" id="edit-confirm-shares" placeholder="确认份额">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('edit-trade-modal')">取消</button>
+                <button class="btn btn-primary" onclick="saveEditTrade()">保存</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 设置持仓弹窗 -->
     <div id="set-holding-modal" class="modal">
         <div class="modal-content">

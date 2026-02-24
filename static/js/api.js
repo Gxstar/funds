@@ -99,6 +99,12 @@ const tradeAPI = {
         body: data,
     }),
     
+    // 更新交易
+    update: (id, data) => request(`${API_BASE}/trades/${id}`, {
+        method: 'PUT',
+        body: data,
+    }),
+    
     // 删除交易
     delete: (id) => request(`${API_BASE}/trades/${id}`, {
         method: 'DELETE',

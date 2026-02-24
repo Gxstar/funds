@@ -224,19 +224,19 @@ class FundService:
             
             trade_id = cursor.lastrowid
             
-            # 使用确认份额更新持仓（如果没有确认份额，则根据金额和确认净值计算）
-            if trade_type == "BUY":
-                actual_shares = confirm_shares
-                if not actual_shares and confirm_net_value and amount:
-                    actual_shares = amount / confirm_net_value
+            # 使用确认份额更新持仓
+            actual_shares = confirm_shares
+            if not actual_shares and confirm_net_value and amount:
+                actual_shares = amount / confirm_net_value
+            
+            if actual_shares:
+                # 在同一个连接中查询持仓
+                cursor = conn.execute(
+                    "SELECT id, total_shares, total_cost FROM holdings WHERE fund_code = ?", (fund_code,)
+                )
+                existing = cursor.fetchone()
                 
-                if actual_shares:
-                    # 在同一个连接中查询持仓
-                    cursor = conn.execute(
-                        "SELECT id, total_shares, total_cost FROM holdings WHERE fund_code = ?", (fund_code,)
-                    )
-                    existing = cursor.fetchone()
-                    
+                if trade_type == "BUY":
                     if existing:
                         current_shares = Decimal(str(existing["total_shares"]))
                         current_cost = Decimal(str(existing["total_cost"]))
@@ -254,6 +254,24 @@ class FundService:
                             INSERT INTO holdings (fund_code, total_shares, cost_price, total_cost)
                             VALUES (?, ?, ?, ?)
                         """, (fund_code, float(actual_shares), float(cost_price), float(amount)))
+                elif trade_type == "SELL":
+                    if existing:
+                        current_shares = Decimal(str(existing["total_shares"]))
+                        current_cost = Decimal(str(existing["total_cost"]))
+                        if current_shares > 0:
+                            cost_per_share = current_cost / current_shares
+                            new_shares = current_shares - actual_shares
+                            new_cost = current_cost - (cost_per_share * actual_shares)
+                            if new_shares > 0:
+                                new_cost_price = new_cost / new_shares
+                                conn.execute("""
+                                    UPDATE holdings 
+                                    SET total_shares = ?, cost_price = ?, total_cost = ?, updated_at = ?
+                                    WHERE fund_code = ?
+                                """, (float(new_shares), float(new_cost_price), float(new_cost), datetime.now(), fund_code))
+                            else:
+                                # 卖光所有份额，删除持仓
+                                conn.execute("DELETE FROM holdings WHERE fund_code = ?", (fund_code,))
             
             return {
                 "id": trade_id,
@@ -295,6 +313,55 @@ class FundService:
             return [dict(row) for row in cursor.fetchall()]
     
     @staticmethod
+    def update_trade(
+        trade_id: int,
+        trade_type: Optional[str] = None,
+        trade_date: Optional[date] = None,
+        confirm_date: Optional[date] = None,
+        confirm_shares: Optional[Decimal] = None,
+        confirm_net_value: Optional[Decimal] = None,
+        amount: Optional[Decimal] = None
+    ) -> Optional[dict]:
+        """更新交易记录"""
+        with get_db_context() as conn:
+            # 先获取原交易记录
+            cursor = conn.execute(
+                "SELECT * FROM trades WHERE id = ?", (trade_id,)
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                return None
+            
+            fund_code = existing["fund_code"]
+            
+            # 更新字段
+            updates = {}
+            if trade_type:
+                updates["trade_type"] = trade_type
+            if trade_date:
+                updates["trade_date"] = trade_date
+            if confirm_date is not None:
+                updates["confirm_date"] = confirm_date
+            if confirm_shares is not None:
+                updates["confirm_shares"] = float(confirm_shares)
+            if confirm_net_value is not None:
+                updates["confirm_net_value"] = float(confirm_net_value)
+            if amount is not None:
+                updates["amount"] = float(amount)
+            
+            if updates:
+                set_clause = ", ".join(f"{k} = ?" for k in updates.keys())
+                values = list(updates.values()) + [trade_id]
+                conn.execute(f"UPDATE trades SET {set_clause} WHERE id = ?", values)
+            
+            # 返回更新后的记录
+            cursor = conn.execute(
+                "SELECT * FROM trades WHERE id = ?", (trade_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
     def delete_trade(trade_id: int) -> bool:
         """删除交易记录"""
         with get_db_context() as conn:
@@ -308,7 +375,7 @@ class FundService:
         """根据交易记录重新计算持仓"""
         with get_db_context() as conn:
             cursor = conn.execute("""
-                SELECT trade_type, shares, price, amount
+                SELECT trade_type, confirm_shares, confirm_net_value, amount
                 FROM trades
                 WHERE fund_code = ?
                 ORDER BY trade_date, created_at
@@ -324,13 +391,13 @@ class FundService:
             total_cost = Decimal("0")
             
             for trade in trades:
-                shares = Decimal(str(trade["shares"]))
-                amount = Decimal(str(trade["amount"]))
+                shares = Decimal(str(trade["confirm_shares"] or 0))
+                amount = Decimal(str(trade["amount"] or 0))
                 
                 if trade["trade_type"] == "BUY":
                     total_shares += shares
                     total_cost += amount
-                else:
+                else:  # SELL
                     if total_shares > 0:
                         cost_per_share = total_cost / total_shares
                         total_shares -= shares

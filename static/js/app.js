@@ -493,9 +493,6 @@ async function submitTrade() {
         alert('交易失败: ' + error.message);
     }
 }
-        alert('交易失败: ' + error.message);
-    }
-}
 
 // 显示设置持仓弹窗
 async function showSetHoldingModal() {
@@ -571,13 +568,14 @@ async function clearHolding() {
 }
 
 // 显示交易历史
+let allTrades = [];  // 存储所有交易记录用于编辑
 async function showTradeHistory() {
     try {
         const result = await tradeAPI.getAll(currentFundCode, 100);
-        const trades = result.data || [];
+        allTrades = result.data || [];
         
         const tbody = document.getElementById('trade-history-body');
-        tbody.innerHTML = trades.map(trade => `
+        tbody.innerHTML = allTrades.map(trade => `
             <tr>
                 <td>${trade.trade_date}</td>
                 <td>${trade.confirm_date || '-'}</td>
@@ -585,7 +583,10 @@ async function showTradeHistory() {
                 <td>${trade.confirm_net_value ? parseFloat(trade.confirm_net_value).toFixed(4) : '-'}</td>
                 <td>${trade.confirm_shares ? parseFloat(trade.confirm_shares).toFixed(2) : '-'}</td>
                 <td>¥${parseFloat(trade.amount).toFixed(2)}</td>
-                <td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${trade.id})">删除</button></td>
+                <td>
+                    <button class="btn btn-sm btn-secondary" onclick="editTrade(${trade.id})">编辑</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteTrade(${trade.id})">删除</button>
+                </td>
             </tr>
         `).join('');
         
@@ -593,6 +594,64 @@ async function showTradeHistory() {
         
     } catch (error) {
         console.error('加载交易历史失败:', error);
+    }
+}
+
+// 编辑交易
+let editingTradeId = null;
+function editTrade(tradeId) {
+    const trade = allTrades.find(t => t.id === tradeId);
+    if (!trade) return;
+    
+    editingTradeId = tradeId;
+    
+    document.getElementById('edit-trade-type').value = trade.trade_type;
+    document.getElementById('edit-trade-date').value = trade.trade_date;
+    document.getElementById('edit-confirm-date').value = trade.confirm_date || '';
+    document.getElementById('edit-trade-amount').value = trade.amount;
+    document.getElementById('edit-confirm-net-value').value = trade.confirm_net_value || '';
+    document.getElementById('edit-confirm-shares').value = trade.confirm_shares || '';
+    
+    showModal('edit-trade-modal');
+}
+
+// 保存编辑的交易
+async function saveEditTrade() {
+    if (!editingTradeId) return;
+    
+    const tradeType = document.getElementById('edit-trade-type').value;
+    const tradeDate = document.getElementById('edit-trade-date').value;
+    const confirmDate = document.getElementById('edit-confirm-date').value;
+    const amount = document.getElementById('edit-trade-amount').value;
+    const confirmNetValue = document.getElementById('edit-confirm-net-value').value;
+    const confirmShares = document.getElementById('edit-confirm-shares').value;
+    
+    if (!tradeDate || !amount) {
+        alert('请填写购买时间和金额');
+        return;
+    }
+    
+    try {
+        await tradeAPI.update(editingTradeId, {
+            trade_type: tradeType,
+            trade_date: tradeDate,
+            confirm_date: confirmDate || null,
+            confirm_net_value: confirmNetValue || null,
+            confirm_shares: confirmShares || null,
+            amount: amount
+        });
+        
+        // 重新计算持仓
+        await tradeAPI.recalculate(currentFundCode);
+        
+        closeModal('edit-trade-modal');
+        await showTradeHistory();
+        await loadFundDetail(currentFundCode);
+        await loadHoldingsSummary();
+        await loadTradePreview(currentFundCode);
+        
+    } catch (error) {
+        alert('保存失败: ' + error.message);
     }
 }
 
