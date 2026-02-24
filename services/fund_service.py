@@ -231,17 +231,29 @@ class FundService:
                     actual_shares = amount / confirm_net_value
                 
                 if actual_shares:
-                    holding = FundService.get_holding(fund_code)
-                    if holding:
-                        current_shares = Decimal(str(holding["total_shares"]))
-                        current_cost = Decimal(str(holding["total_cost"]))
+                    # 在同一个连接中查询持仓
+                    cursor = conn.execute(
+                        "SELECT id, total_shares, total_cost FROM holdings WHERE fund_code = ?", (fund_code,)
+                    )
+                    existing = cursor.fetchone()
+                    
+                    if existing:
+                        current_shares = Decimal(str(existing["total_shares"]))
+                        current_cost = Decimal(str(existing["total_cost"]))
                         new_shares = current_shares + actual_shares
                         new_cost = current_cost + amount
                         new_cost_price = new_cost / new_shares if new_shares else Decimal("0")
-                        FundService.update_holding(fund_code, new_shares, new_cost_price, new_cost)
+                        conn.execute("""
+                            UPDATE holdings 
+                            SET total_shares = ?, cost_price = ?, total_cost = ?, updated_at = ?
+                            WHERE fund_code = ?
+                        """, (float(new_shares), float(new_cost_price), float(new_cost), datetime.now(), fund_code))
                     else:
                         cost_price = confirm_net_value if confirm_net_value else (amount / actual_shares if actual_shares else Decimal("0"))
-                        FundService.update_holding(fund_code, actual_shares, cost_price, amount)
+                        conn.execute("""
+                            INSERT INTO holdings (fund_code, total_shares, cost_price, total_cost)
+                            VALUES (?, ?, ?, ?)
+                        """, (fund_code, float(actual_shares), float(cost_price), float(amount)))
             
             return {
                 "id": trade_id,
