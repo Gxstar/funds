@@ -6,7 +6,7 @@ from typing import Optional, List
 import logging
 import httpx
 
-from utils.helpers import get_setting
+from utils.helpers import get_setting, get_total_position_amount
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +32,15 @@ ANALYSIS_PROMPT = """你是一位专业的基金投资顾问。请根据以下�
 ## 持仓信息（如有）
 {holding_info}
 
+## 仓位信息
+{position_info}
+
 ## 请回答
 1. 当前技术面分析（趋势判断、支撑压力位）
 2. 买卖建议（强烈买入/买入/持有/卖出/强烈卖出）
 3. 建议理由（分点说明，简洁明了）
 4. 风险提示
+5. 仓位建议（基于当前仓位比例给出加减仓建议）
 
 请用简洁专业的语言回答，不要过于冗长。回复格式使用 Markdown。
 """
@@ -156,6 +160,23 @@ class AIService:
         else:
             holding_info = "暂无持仓"
         
+        # 仓位信息
+        total_position = get_total_position_amount()
+        if total_position > 0:
+            # 获取总市值
+            from services.fund_service import FundService
+            summary = FundService.get_holdings_summary()
+            total_market_value = Decimal(str(summary.get("total_market_value", 0)))
+            position_ratio = float(total_market_value / total_position * 100) if total_position else 0
+            available = total_position - total_market_value
+            
+            position_info = f"""- 满仓金额: ¥{float(total_position):,.2f}
+- 当前市值: ¥{float(total_market_value):,.2f}
+- 仓位比例: {position_ratio:.1f}%
+- 剩余可用: ¥{float(available):,.2f}"""
+        else:
+            position_info = "未设置满仓金额（可在设置中配置）"
+        
         # 构建提示词
         prompt = ANALYSIS_PROMPT.format(
             fund_name=fund.get("fund_name", ""),
@@ -170,7 +191,8 @@ class AIService:
             ma20=get_latest(indicators.get("ma20", [])),
             rsi=get_latest(indicators.get("rsi", [])),
             macd=get_latest(indicators.get("macd", {}).get("macd", [])),
-            holding_info=holding_info
+            holding_info=holding_info,
+            position_info=position_info
         )
         
         try:

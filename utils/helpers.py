@@ -127,6 +127,22 @@ def set_env_setting(key: str, value: Optional[str]) -> None:
     _write_env_file(env_vars)
 
 
+def get_total_position_amount() -> Decimal:
+    """获取满仓金额配置"""
+    value = get_setting("total_position_amount")
+    if value:
+        try:
+            return Decimal(value)
+        except:
+            pass
+    return Decimal("0")
+
+
+def set_total_position_amount(amount: Decimal) -> None:
+    """设置满仓金额"""
+    set_setting("total_position_amount", str(amount))
+
+
 def format_decimal(value: Decimal, places: int = 2) -> str:
     """格式化小数"""
     return f"{value:.{places}f}"

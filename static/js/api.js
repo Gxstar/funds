@@ -168,4 +168,13 @@ const aiAPI = {
         method: 'POST',
         body: data,
     }),
+    
+    // 获取仓位设置
+    getPositionSetting: () => request(`${API_BASE}/ai/position-setting`),
+    
+    // 更新仓位设置
+    updatePositionSetting: (data) => request(`${API_BASE}/ai/position-setting`, {
+        method: 'POST',
+        body: data,
+    }),
 };

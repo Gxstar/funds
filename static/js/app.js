@@ -100,7 +100,10 @@ async function loadHomePage() {
 // 加载首页汇总数据
 async function loadHomeSummary() {
     try {
-        const summary = await holdingAPI.getSummary();
+        const [summary, settings] = await Promise.all([
+            holdingAPI.getSummary(),
+            aiAPI.getSettings()
+        ]);
         
         document.getElementById('home-total-cost').textContent = formatCurrency(summary.total_cost);
         document.getElementById('home-total-market').textContent = formatCurrency(summary.total_market_value);
@@ -122,7 +125,30 @@ async function loadHomeSummary() {
             profitRateEl.classList.add('text-green');
         }
         
-        document.getElementById('home-fund-count').textContent = summary.fund_count;
+        // 计算仓位比例
+        const positionRatioEl = document.getElementById('home-position-ratio');
+        const positionDetailEl = document.getElementById('home-position-detail');
+        
+        const totalPosition = parseFloat(settings.total_position_amount) || 0;
+        if (totalPosition > 0) {
+            const ratio = (summary.total_market_value / totalPosition * 100);
+            const available = totalPosition - summary.total_market_value;
+            
+            positionRatioEl.textContent = ratio.toFixed(1) + '%';
+            positionDetailEl.textContent = `剩余 ${formatCurrency(available)}`;
+            
+            // 根据仓位高低显示不同颜色
+            positionRatioEl.classList.remove('text-red', 'text-green');
+            if (ratio >= 90) {
+                positionRatioEl.classList.add('text-red'); // 高仓位
+            } else if (ratio <= 30) {
+                positionRatioEl.classList.add('text-green'); // 低仓位
+            }
+        } else {
+            positionRatioEl.textContent = '-';
+            positionDetailEl.textContent = '未设置满仓金额';
+            positionRatioEl.classList.remove('text-red', 'text-green');
+        }
         
     } catch (error) {
         console.error('加载首页汇总失败:', error);
@@ -1093,9 +1119,19 @@ async function showSettingsModal() {
     try {
         const settings = await aiAPI.getSettings();
         
-        document.getElementById('setting-api-key').value = settings.deepseek_api_key || '';
+        // API Key: 如果已配置则显示占位符，不显示真实值
+        const apiKeyInput = document.getElementById('setting-api-key');
+        if (settings.api_key_configured) {
+            apiKeyInput.value = '';
+            apiKeyInput.placeholder = '已配置（留空保持不变）';
+        } else {
+            apiKeyInput.value = '';
+            apiKeyInput.placeholder = 'sk-...';
+        }
+        
         document.getElementById('setting-base-url').value = settings.deepseek_base_url || '';
         document.getElementById('setting-model').value = settings.deepseek_model || 'deepseek-chat';
+        document.getElementById('setting-total-position').value = settings.total_position_amount && settings.total_position_amount !== '0' ? settings.total_position_amount : '';
         
         showModal('settings-modal');
         
@@ -1109,19 +1145,34 @@ async function saveSettings() {
     const apiKey = document.getElementById('setting-api-key').value.trim();
     const baseUrl = document.getElementById('setting-base-url').value.trim();
     const model = document.getElementById('setting-model').value;
+    const totalPosition = document.getElementById('setting-total-position').value.trim();
     
     try {
-        await aiAPI.updateSettings({
-            deepseek_api_key: apiKey || null,
-            deepseek_base_url: baseUrl || null,
-            deepseek_model: model
+        // 保存 AI 设置（只发送有值的字段）
+        const aiSettings = {};
+        if (apiKey) aiSettings.deepseek_api_key = apiKey;
+        if (baseUrl) aiSettings.deepseek_base_url = baseUrl;
+        if (model) aiSettings.deepseek_model = model;
+        
+        if (Object.keys(aiSettings).length > 0) {
+            await aiAPI.updateSettings(aiSettings);
+        }
+        
+        // 保存仓位设置
+        await aiAPI.updatePositionSetting({
+            total_position_amount: totalPosition || ''
         });
         
         closeModal('settings-modal');
-        alert('设置已保存到 .env 文件');
+        showToast('设置已保存', 'success');
+        
+        // 刷新首页数据
+        if (currentView === 'home') {
+            loadHomeSummary();
+        }
         
     } catch (error) {
-        alert('保存失败: ' + error.message);
+        showToast('保存失败: ' + error.message, 'error');
     }
 }
 

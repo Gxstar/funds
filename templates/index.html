@@ -85,9 +85,9 @@
                         <span class="sub-value" id="home-profit-rate">0.00%</span>
                     </div>
                     <div class="home-summary-item">
-                        <span class="label">持仓基金</span>
-                        <span class="value" id="home-fund-count">0</span>
-                        <span class="sub-label">只</span>
+                        <span class="label">当前仓位</span>
+                        <span class="value" id="home-position-ratio">-</span>
+                        <span class="sub-value" id="home-position-detail">未设置满仓金额</span>
                     </div>
                 </div>
 
@@ -463,7 +463,16 @@
                 <span class="close" onclick="closeModal('settings-modal')">&times;</span>
             </div>
             <div class="modal-body">
-                <h4>DeepSeek AI 配置</h4>
+                <h4>仓位设置</h4>
+                <div class="form-group">
+                    <label>满仓金额（元）</label>
+                    <input type="number" step="0.01" id="setting-total-position" placeholder="计划投资的总额">
+                    <p style="color: #999; font-size: 12px; margin-top: 4px;">
+                        用于计算当前仓位比例，辅助 AI 分析决策
+                    </p>
+                </div>
+                
+                <h4 style="margin-top: 20px;">DeepSeek AI 配置</h4>
                 <div class="form-group">
                     <label>API Key</label>
                     <input type="password" id="setting-api-key" placeholder="sk-...">
@@ -480,7 +489,7 @@
                     </select>
                 </div>
                 <p style="color: #999; font-size: 12px; margin-top: 8px;">
-                    设置将保存到项目根目录的 .env 文件中
+                    AI 设置将保存到项目根目录的 .env 文件中
                 </p>
             </div>
             <div class="modal-footer">
