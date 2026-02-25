@@ -17,7 +17,8 @@ class FundService:
     def get_all_funds() -> List[dict]:
         """获取所有基金列表"""
         with get_db_context() as conn:
-            cursor = conn.execute("""
+            cursor = conn.cursor()
+            cursor.execute("""
                 SELECT f.*, 
                        h.total_shares, h.cost_price, h.total_cost
                 FROM funds f
@@ -30,12 +31,13 @@ class FundService:
     def get_fund_by_code(fund_code: str) -> Optional[dict]:
         """根据代码获取基金"""
         with get_db_context() as conn:
-            cursor = conn.execute("""
+            cursor = conn.cursor()
+            cursor.execute("""
                 SELECT f.*, 
                        h.total_shares, h.cost_price, h.total_cost
                 FROM funds f
                 LEFT JOIN holdings h ON f.fund_code = h.fund_code
-                WHERE f.fund_code = ?
+                WHERE f.fund_code = %s
             """, (fund_code,))
             row = cursor.fetchone()
             return dict(row) if row else None
@@ -49,10 +51,11 @@ class FundService:
     ) -> dict:
         """添加基金"""
         with get_db_context() as conn:
+            cursor = conn.cursor()
             try:
-                conn.execute("""
+                cursor.execute("""
                     INSERT INTO funds (fund_code, fund_name, fund_type, risk_level)
-                    VALUES (?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s)
                 """, (fund_code, fund_name, fund_type, risk_level))
                 
                 return {
@@ -62,7 +65,7 @@ class FundService:
                     "risk_level": risk_level
                 }
             except Exception as e:
-                if "UNIQUE constraint" in str(e):
+                if "unique" in str(e).lower() or "duplicate" in str(e).lower():
                     raise ValueError(f"基金 {fund_code} 已存在")
                 raise
     
@@ -79,11 +82,12 @@ class FundService:
         updates["info_updated_at"] = datetime.now()
         
         with get_db_context() as conn:
-            set_clause = ", ".join(f"{k} = ?" for k in updates.keys())
+            cursor = conn.cursor()
+            set_clause = ", ".join(f"{k} = %s" for k in updates.keys())
             values = list(updates.values()) + [fund_code]
             
-            conn.execute(f"""
-                UPDATE funds SET {set_clause} WHERE fund_code = ?
+            cursor.execute(f"""
+                UPDATE funds SET {set_clause} WHERE fund_code = %s
             """, values)
             
             return FundService.get_fund_by_code(fund_code)
@@ -92,23 +96,25 @@ class FundService:
     def delete_fund(fund_code: str) -> bool:
         """删除基金（同时删除相关数据）"""
         with get_db_context() as conn:
+            cursor = conn.cursor()
             # 删除持仓
-            conn.execute("DELETE FROM holdings WHERE fund_code = ?", (fund_code,))
+            cursor.execute("DELETE FROM holdings WHERE fund_code = %s", (fund_code,))
             # 删除交易记录
-            conn.execute("DELETE FROM trades WHERE fund_code = ?", (fund_code,))
+            cursor.execute("DELETE FROM trades WHERE fund_code = %s", (fund_code,))
             # 删除价格数据
-            conn.execute("DELETE FROM prices WHERE fund_code = ?", (fund_code,))
+            cursor.execute("DELETE FROM prices WHERE fund_code = %s", (fund_code,))
             # 删除缓存元数据
-            conn.execute("DELETE FROM cache_meta WHERE fund_code = ?", (fund_code,))
+            cursor.execute("DELETE FROM cache_meta WHERE fund_code = %s", (fund_code,))
             # 删除基金
-            cursor = conn.execute("DELETE FROM funds WHERE fund_code = ?", (fund_code,))
+            cursor.execute("DELETE FROM funds WHERE fund_code = %s", (fund_code,))
             return cursor.rowcount > 0
     
     @staticmethod
     def get_holdings_summary() -> dict:
         """获取持仓汇总"""
         with get_db_context() as conn:
-            cursor = conn.execute("""
+            cursor = conn.cursor()
+            cursor.execute("""
                 SELECT 
                     COALESCE(SUM(h.total_cost), 0) as total_cost,
                     COUNT(h.fund_code) as fund_count
@@ -120,7 +126,7 @@ class FundService:
             fund_count = summary_row["fund_count"]
             
             # 计算当前市值（需要最新净值）
-            cursor = conn.execute("""
+            cursor.execute("""
                 SELECT h.fund_code, h.total_shares, h.total_cost, f.last_net_value
                 FROM holdings h
                 LEFT JOIN funds f ON h.fund_code = f.fund_code
@@ -147,11 +153,12 @@ class FundService:
     def get_holding(fund_code: str) -> Optional[dict]:
         """获取单只基金持仓"""
         with get_db_context() as conn:
-            cursor = conn.execute("""
+            cursor = conn.cursor()
+            cursor.execute("""
                 SELECT h.*, f.fund_name, f.last_net_value, f.last_growth_rate
                 FROM holdings h
                 JOIN funds f ON h.fund_code = f.fund_code
-                WHERE h.fund_code = ?
+                WHERE h.fund_code = %s
             """, (fund_code,))
             row = cursor.fetchone()
             return dict(row) if row else None
@@ -165,30 +172,31 @@ class FundService:
     ) -> Optional[dict]:
         """更新或创建持仓"""
         with get_db_context() as conn:
+            cursor = conn.cursor()
             # 检查是否已有持仓
-            cursor = conn.execute(
-                "SELECT id FROM holdings WHERE fund_code = ?", (fund_code,)
+            cursor.execute(
+                "SELECT id FROM holdings WHERE fund_code = %s", (fund_code,)
             )
             existing = cursor.fetchone()
             
             if existing:
-                conn.execute("""
+                cursor.execute("""
                     UPDATE holdings 
-                    SET total_shares = ?, cost_price = ?, total_cost = ?, updated_at = ?
-                    WHERE fund_code = ?
+                    SET total_shares = %s, cost_price = %s, total_cost = %s, updated_at = %s
+                    WHERE fund_code = %s
                 """, (float(total_shares), float(cost_price), float(total_cost), datetime.now(), fund_code))
             else:
-                conn.execute("""
+                cursor.execute("""
                     INSERT INTO holdings (fund_code, total_shares, cost_price, total_cost)
-                    VALUES (?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s)
                 """, (fund_code, float(total_shares), float(cost_price), float(total_cost)))
             
             # 在同一个连接中查询返回结果（避免事务未提交导致查不到数据）
-            cursor = conn.execute("""
+            cursor.execute("""
                 SELECT h.*, f.fund_name, f.last_net_value, f.last_growth_rate
                 FROM holdings h
                 JOIN funds f ON h.fund_code = f.fund_code
-                WHERE h.fund_code = ?
+                WHERE h.fund_code = %s
             """, (fund_code,))
             row = cursor.fetchone()
             return dict(row) if row else None
@@ -197,8 +205,9 @@ class FundService:
     def delete_holding(fund_code: str) -> bool:
         """删除持仓"""
         with get_db_context() as conn:
-            cursor = conn.execute(
-                "DELETE FROM holdings WHERE fund_code = ?", (fund_code,)
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM holdings WHERE fund_code = %s", (fund_code,)
             )
             return cursor.rowcount > 0
     
@@ -214,15 +223,17 @@ class FundService:
     ) -> dict:
         """添加交易记录"""
         with get_db_context() as conn:
-            cursor = conn.execute("""
+            cursor = conn.cursor()
+            cursor.execute("""
                 INSERT INTO trades (fund_code, trade_type, trade_date, confirm_date, confirm_shares, confirm_net_value, amount)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
             """, (fund_code, trade_type, trade_date, confirm_date, 
                   float(confirm_shares) if confirm_shares else None,
                   float(confirm_net_value) if confirm_net_value else None,
                   float(amount)))
             
-            trade_id = cursor.lastrowid
+            trade_id = cursor.fetchone()["id"]
             
             # 使用确认份额更新持仓
             actual_shares = confirm_shares
@@ -231,8 +242,8 @@ class FundService:
             
             if actual_shares:
                 # 在同一个连接中查询持仓
-                cursor = conn.execute(
-                    "SELECT id, total_shares, total_cost FROM holdings WHERE fund_code = ?", (fund_code,)
+                cursor.execute(
+                    "SELECT id, total_shares, total_cost FROM holdings WHERE fund_code = %s", (fund_code,)
                 )
                 existing = cursor.fetchone()
                 
@@ -243,16 +254,16 @@ class FundService:
                         new_shares = current_shares + actual_shares
                         new_cost = current_cost + amount
                         new_cost_price = new_cost / new_shares if new_shares else Decimal("0")
-                        conn.execute("""
+                        cursor.execute("""
                             UPDATE holdings 
-                            SET total_shares = ?, cost_price = ?, total_cost = ?, updated_at = ?
-                            WHERE fund_code = ?
+                            SET total_shares = %s, cost_price = %s, total_cost = %s, updated_at = %s
+                            WHERE fund_code = %s
                         """, (float(new_shares), float(new_cost_price), float(new_cost), datetime.now(), fund_code))
                     else:
                         cost_price = confirm_net_value if confirm_net_value else (amount / actual_shares if actual_shares else Decimal("0"))
-                        conn.execute("""
+                        cursor.execute("""
                             INSERT INTO holdings (fund_code, total_shares, cost_price, total_cost)
-                            VALUES (?, ?, ?, ?)
+                            VALUES (%s, %s, %s, %s)
                         """, (fund_code, float(actual_shares), float(cost_price), float(amount)))
                 elif trade_type == "SELL":
                     if existing:
@@ -264,14 +275,14 @@ class FundService:
                             new_cost = current_cost - (cost_per_share * actual_shares)
                             if new_shares > 0:
                                 new_cost_price = new_cost / new_shares
-                                conn.execute("""
+                                cursor.execute("""
                                     UPDATE holdings 
-                                    SET total_shares = ?, cost_price = ?, total_cost = ?, updated_at = ?
-                                    WHERE fund_code = ?
+                                    SET total_shares = %s, cost_price = %s, total_cost = %s, updated_at = %s
+                                    WHERE fund_code = %s
                                 """, (float(new_shares), float(new_cost_price), float(new_cost), datetime.now(), fund_code))
                             else:
                                 # 卖光所有份额，删除持仓
-                                conn.execute("DELETE FROM holdings WHERE fund_code = ?", (fund_code,))
+                                cursor.execute("DELETE FROM holdings WHERE fund_code = %s", (fund_code,))
             
             return {
                 "id": trade_id,
@@ -292,22 +303,23 @@ class FundService:
     ) -> List[dict]:
         """获取交易记录"""
         with get_db_context() as conn:
+            cursor = conn.cursor()
             if fund_code:
-                cursor = conn.execute("""
+                cursor.execute("""
                     SELECT t.*, f.fund_name
                     FROM trades t
                     JOIN funds f ON t.fund_code = f.fund_code
-                    WHERE t.fund_code = ?
+                    WHERE t.fund_code = %s
                     ORDER BY t.trade_date DESC, t.created_at DESC
-                    LIMIT ? OFFSET ?
+                    LIMIT %s OFFSET %s
                 """, (fund_code, limit, offset))
             else:
-                cursor = conn.execute("""
+                cursor.execute("""
                     SELECT t.*, f.fund_name
                     FROM trades t
                     JOIN funds f ON t.fund_code = f.fund_code
                     ORDER BY t.trade_date DESC, t.created_at DESC
-                    LIMIT ? OFFSET ?
+                    LIMIT %s OFFSET %s
                 """, (limit, offset))
             
             return [dict(row) for row in cursor.fetchall()]
@@ -324,9 +336,10 @@ class FundService:
     ) -> Optional[dict]:
         """更新交易记录"""
         with get_db_context() as conn:
+            cursor = conn.cursor()
             # 先获取原交易记录
-            cursor = conn.execute(
-                "SELECT * FROM trades WHERE id = ?", (trade_id,)
+            cursor.execute(
+                "SELECT * FROM trades WHERE id = %s", (trade_id,)
             )
             existing = cursor.fetchone()
             if not existing:
@@ -350,13 +363,13 @@ class FundService:
                 updates["amount"] = float(amount)
             
             if updates:
-                set_clause = ", ".join(f"{k} = ?" for k in updates.keys())
+                set_clause = ", ".join(f"{k} = %s" for k in updates.keys())
                 values = list(updates.values()) + [trade_id]
-                conn.execute(f"UPDATE trades SET {set_clause} WHERE id = ?", values)
+                cursor.execute(f"UPDATE trades SET {set_clause} WHERE id = %s", values)
             
             # 返回更新后的记录
-            cursor = conn.execute(
-                "SELECT * FROM trades WHERE id = ?", (trade_id,)
+            cursor.execute(
+                "SELECT * FROM trades WHERE id = %s", (trade_id,)
             )
             row = cursor.fetchone()
             return dict(row) if row else None
@@ -365,8 +378,9 @@ class FundService:
     def delete_trade(trade_id: int) -> bool:
         """删除交易记录"""
         with get_db_context() as conn:
-            cursor = conn.execute(
-                "DELETE FROM trades WHERE id = ?", (trade_id,)
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM trades WHERE id = %s", (trade_id,)
             )
             return cursor.rowcount > 0
     
@@ -374,10 +388,11 @@ class FundService:
     def recalculate_holding(fund_code: str) -> Optional[dict]:
         """根据交易记录重新计算持仓"""
         with get_db_context() as conn:
-            cursor = conn.execute("""
+            cursor = conn.cursor()
+            cursor.execute("""
                 SELECT trade_type, confirm_shares, confirm_net_value, amount
                 FROM trades
-                WHERE fund_code = ?
+                WHERE fund_code = %s
                 ORDER BY trade_date, created_at
             """, (fund_code,))
             

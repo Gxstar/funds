@@ -43,8 +43,10 @@ async def analyze_portfolio():
 async def get_settings():
     """获取 AI 设置"""
     from utils.helpers import get_setting
+    api_key = get_setting("deepseek_api_key")
     return {
-        "deepseek_api_key": "***" if get_setting("deepseek_api_key") else "",
+        "api_key_configured": bool(api_key),
+        "deepseek_api_key": "***" if api_key else "",
         "deepseek_base_url": get_setting("deepseek_base_url") or "https://api.deepseek.com/v1",
         "deepseek_model": get_setting("deepseek_model") or "deepseek-chat"
     }
@@ -52,14 +54,14 @@ async def get_settings():
 
 @router.post("/settings")
 async def update_settings(settings: SettingsUpdate):
-    """更新 AI 设置"""
-    from utils.helpers import set_setting
+    """更新 AI 设置，保存到 .env 文件"""
+    from utils.helpers import set_env_setting
     
     if settings.deepseek_api_key is not None:
-        set_setting("deepseek_api_key", settings.deepseek_api_key)
+        set_env_setting("deepseek_api_key", settings.deepseek_api_key or None)
     if settings.deepseek_base_url is not None:
-        set_setting("deepseek_base_url", settings.deepseek_base_url)
+        set_env_setting("deepseek_base_url", settings.deepseek_base_url or None)
     if settings.deepseek_model is not None:
-        set_setting("deepseek_model", settings.deepseek_model)
+        set_env_setting("deepseek_model", settings.deepseek_model or None)
     
-    return {"message": "设置已保存"}
+    return {"message": "设置已保存到 .env 文件"}

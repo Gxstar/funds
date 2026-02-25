@@ -22,31 +22,39 @@ class MarketService:
     ) -> List[dict]:
         """从数据库获取历史净值"""
         with get_db_context() as conn:
-            sql = "SELECT * FROM prices WHERE fund_code = ?"
+            cursor = conn.cursor()
+            sql = "SELECT * FROM prices WHERE fund_code = %s"
             params = [fund_code]
             
             if start_date:
-                sql += " AND date >= ?"
+                sql += " AND date >= %s"
                 params.append(start_date)
             if end_date:
-                sql += " AND date <= ?"
+                sql += " AND date <= %s"
                 params.append(end_date)
             
             sql += " ORDER BY date ASC"
             
-            cursor = conn.execute(sql, params)
+            cursor.execute(sql, params)
             return [dict(row) for row in cursor.fetchall()]
     
     @staticmethod
     def get_latest_price_date(fund_code: str) -> Optional[date]:
         """获取数据库中最新的净值日期"""
         with get_db_context() as conn:
-            cursor = conn.execute(
-                "SELECT MAX(date) as max_date FROM prices WHERE fund_code = ?",
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT MAX(date) as max_date FROM prices WHERE fund_code = %s",
                 (fund_code,)
             )
             row = cursor.fetchone()
-            return row["max_date"] if row and row["max_date"] else None
+            if row and row["max_date"]:
+                max_date = row["max_date"]
+                # 确保返回 date 对象
+                if isinstance(max_date, str):
+                    return datetime.strptime(max_date, "%Y-%m-%d").date()
+                return max_date
+            return None
     
     @staticmethod
     def save_prices(fund_code: str, prices: List[dict]) -> int:
@@ -55,13 +63,18 @@ class MarketService:
             return 0
         
         with get_db_context() as conn:
+            cursor = conn.cursor()
             count = 0
             for p in prices:
                 try:
-                    conn.execute("""
-                        INSERT OR REPLACE INTO prices 
+                    cursor.execute("""
+                        INSERT INTO prices 
                         (fund_code, net_value, accum_value, date, growth_rate)
-                        VALUES (?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (fund_code, date) DO UPDATE SET
+                            net_value = EXCLUDED.net_value,
+                            accum_value = EXCLUDED.accum_value,
+                            growth_rate = EXCLUDED.growth_rate
                     """, (
                         fund_code,
                         float(p.get("net_value")) if p.get("net_value") is not None else None,
@@ -84,26 +97,27 @@ class MarketService:
     ) -> None:
         """更新缓存元数据"""
         with get_db_context() as conn:
-            conn.execute("""
+            cursor = conn.cursor()
+            cursor.execute("""
                 INSERT INTO cache_meta (fund_code, last_sync_date, last_sync_time, sync_status, error_message, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(fund_code) DO UPDATE SET
-                    last_sync_date = ?,
-                    last_sync_time = ?,
-                    sync_status = ?,
-                    error_message = ?,
-                    updated_at = ?
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (fund_code) DO UPDATE SET
+                    last_sync_date = EXCLUDED.last_sync_date,
+                    last_sync_time = EXCLUDED.last_sync_time,
+                    sync_status = EXCLUDED.sync_status,
+                    error_message = EXCLUDED.error_message,
+                    updated_at = EXCLUDED.updated_at
             """, (
-                fund_code, last_sync_date, datetime.now(), sync_status, error_message, datetime.now(),
-                last_sync_date, datetime.now(), sync_status, error_message, datetime.now()
+                fund_code, last_sync_date, datetime.now(), sync_status, error_message, datetime.now()
             ))
     
     @staticmethod
     def get_cache_meta(fund_code: str) -> Optional[dict]:
         """获取缓存元数据"""
         with get_db_context() as conn:
-            cursor = conn.execute(
-                "SELECT * FROM cache_meta WHERE fund_code = ?",
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM cache_meta WHERE fund_code = %s",
                 (fund_code,)
             )
             row = cursor.fetchone()
@@ -361,32 +375,37 @@ class MarketService:
     ) -> dict:
         """获取交易记录用于图表显示"""
         with get_db_context() as conn:
+            cursor = conn.cursor()
             sql = """SELECT trade_type, trade_date, confirm_date, confirm_net_value, amount 
-                     FROM trades WHERE fund_code = ?"""
+                     FROM trades WHERE fund_code = %s"""
             params = [fund_code]
             
             if start_date:
-                sql += " AND confirm_date >= ?"
+                sql += " AND confirm_date >= %s"
                 params.append(start_date)
             if end_date:
-                sql += " AND trade_date <= ?"
+                sql += " AND trade_date <= %s"
                 params.append(end_date)
             
             sql += " ORDER BY trade_date ASC"
             
-            cursor = conn.execute(sql, params)
+            cursor.execute(sql, params)
             rows = cursor.fetchall()
+            
+            # 将图表日期统一转换为字符串格式，便于匹配
+            chart_dates_str = [str(d) if hasattr(d, 'strftime') else d for d in chart_dates]
             
             buy_points = []
             sell_points = []
             
             for row in rows:
                 # 使用交易日期（购买时间）来定位买卖点
-                match_date = str(row["trade_date"])
+                trade_date = row["trade_date"]
+                match_date = str(trade_date) if hasattr(trade_date, 'strftime') else trade_date
                 
                 # 在图表日期中找到对应的索引
-                if match_date in chart_dates:
-                    idx = chart_dates.index(match_date)
+                if match_date in chart_dates_str:
+                    idx = chart_dates_str.index(match_date)
                     
                     # 获取净值：优先使用确认净值，否则从图表数据中获取
                     if row["confirm_net_value"]:

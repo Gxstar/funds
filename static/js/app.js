@@ -819,7 +819,7 @@ async function saveSettings() {
         });
         
         closeModal('settings-modal');
-        alert('设置已保存');
+        alert('设置已保存到 .env 文件');
         
     } catch (error) {
         alert('保存失败: ' + error.message);
@@ -828,8 +828,15 @@ async function saveSettings() {
 
 // 刷新所有数据
 async function refreshAll() {
+    const btn = document.querySelector('[onclick="refreshAll()"]');
+    const originalText = btn?.innerHTML;
+    if (btn) {
+        btn.innerHTML = '⟳ 刷新中...';
+        btn.disabled = true;
+    }
+    
     try {
-        await marketAPI.syncAll();
+        const result = await marketAPI.syncAll();
         await loadFundList();
         await loadHoldingsSummary();
         
@@ -841,8 +848,16 @@ async function refreshAll() {
         
         document.getElementById('last-update').textContent = '最后更新: ' + new Date().toLocaleString();
         
+        // 显示成功提示
+        showToast('数据刷新成功', 'success');
+        
     } catch (error) {
-        alert('刷新失败: ' + error.message);
+        showToast('刷新失败: ' + error.message, 'error');
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
     }
 }
 
@@ -859,6 +874,29 @@ function formatPercent(value) {
     const num = parseFloat(value);
     const sign = num > 0 ? '+' : '';
     return sign + num.toFixed(2) + '%';
+}
+
+// 显示提示信息
+function showToast(message, type = 'info') {
+    // 移除已存在的 toast
+    const existingToast = document.querySelector('.toast-message');
+    if (existingToast) {
+        existingToast.remove();
+    }
+    
+    const toast = document.createElement('div');
+    toast.className = `toast-message toast-${type}`;
+    toast.innerHTML = message;
+    document.body.appendChild(toast);
+    
+    // 显示动画
+    setTimeout(() => toast.classList.add('show'), 10);
+    
+    // 自动消失
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
 }
 
 // 弹窗控制
