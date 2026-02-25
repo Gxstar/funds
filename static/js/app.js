@@ -225,6 +225,7 @@ async function loadChart(fundCode, period) {
         }
         
         const indicators = data.indicators || {};
+        const trades = data.trades || { buy: [], sell: [] };
         
         const option = {
             tooltip: {
@@ -232,8 +233,16 @@ async function loadChart(fundCode, period) {
                 axisPointer: { type: 'cross' }
             },
             legend: {
-                data: ['净值', 'MA5', 'MA10', 'MA20'],
-                bottom: 0
+                data: ['净值', 'MA5', 'MA10', 'MA20', '买入', '卖出'],
+                bottom: 0,
+                selected: {
+                    '净值': true,
+                    'MA5': false,
+                    'MA10': false,
+                    'MA20': false,
+                    '买入': false,
+                    '卖出': false
+                }
             },
             grid: {
                 left: '3%',
@@ -296,6 +305,32 @@ async function loadChart(fundCode, period) {
                     showSymbol: false,
                     lineStyle: { width: 1, type: 'dashed' },
                     itemStyle: { color: '#722ed1' }
+                },
+                {
+                    name: '买入',
+                    type: 'scatter',
+                    data: trades.buy,
+                    symbol: 'circle',
+                    symbolSize: 10,
+                    itemStyle: {
+                        color: '#ff6b6b',
+                        borderColor: '#fff',
+                        borderWidth: 2
+                    },
+                    z: 10
+                },
+                {
+                    name: '卖出',
+                    type: 'scatter',
+                    data: trades.sell,
+                    symbol: 'circle',
+                    symbolSize: 10,
+                    itemStyle: {
+                        color: '#20c997',
+                        borderColor: '#fff',
+                        borderWidth: 2
+                    },
+                    z: 10
                 }
             ]
         };

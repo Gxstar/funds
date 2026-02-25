@@ -340,9 +340,61 @@ class MarketService:
         rsi = calculate_rsi(price_decimals, 14)
         indicators["rsi"] = [float(v) if v else None for v in rsi]
         
+        # 获取交易记录，用于在图表上标记买卖点
+        trades = MarketService.get_trades_for_chart(fund_code, start_date, end_date, dates)
+        
         return {
             "fund_code": fund_code,
             "dates": dates,
             "values": values,
-            "indicators": indicators
+            "indicators": indicators,
+            "trades": trades
         }
+
+    @staticmethod
+    def get_trades_for_chart(
+        fund_code: str,
+        start_date: Optional[date],
+        end_date: Optional[date],
+        chart_dates: List
+    ) -> dict:
+        """获取交易记录用于图表显示"""
+        with get_db_context() as conn:
+            sql = """SELECT trade_type, trade_date, confirm_net_value, amount 
+                     FROM trades WHERE fund_code = ?"""
+            params = [fund_code]
+            
+            if start_date:
+                sql += " AND trade_date >= ?"
+                params.append(start_date)
+            if end_date:
+                sql += " AND trade_date <= ?"
+                params.append(end_date)
+            
+            sql += " ORDER BY trade_date ASC"
+            
+            cursor = conn.execute(sql, params)
+            rows = cursor.fetchall()
+            
+            buy_points = []
+            sell_points = []
+            
+            for row in rows:
+                trade_date = str(row["trade_date"])
+                # 在图表日期中找到对应的索引
+                if trade_date in chart_dates:
+                    idx = chart_dates.index(trade_date)
+                    point = {
+                        "date": trade_date,
+                        "value": float(row["confirm_net_value"]) if row["confirm_net_value"] else None,
+                        "amount": float(row["amount"]) if row["amount"] else None
+                    }
+                    if row["trade_type"] == "BUY":
+                        buy_points.append([idx, point["value"]])
+                    else:
+                        sell_points.append([idx, point["value"]])
+            
+            return {
+                "buy": buy_points,
+                "sell": sell_points
+            }
