@@ -762,3 +762,216 @@ body {
 .toast-warning {
     background: linear-gradient(135deg, #faad14 0%, #d48806 100%);
 }
+
+/* 首页样式 */
+.home-page {
+    padding: 0;
+}
+
+.home-summary-card {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.home-summary-item {
+    background: #fff;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    text-align: center;
+}
+
+.home-summary-item .label {
+    display: block;
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.home-summary-item .value {
+    display: block;
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.home-summary-item .sub-value {
+    display: block;
+    font-size: 14px;
+    margin-top: 4px;
+}
+
+.home-summary-item .sub-label {
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.home-summary-item.highlight {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.home-summary-item.highlight .label,
+.home-summary-item.highlight .value,
+.home-summary-item.highlight .sub-value {
+    color: #fff;
+}
+
+.home-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+}
+
+.home-chart-container {
+    width: 100%;
+    height: 250px;
+}
+
+.today-change-list {
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+.today-change-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.today-change-item:last-child {
+    border-bottom: none;
+}
+
+.today-change-item .name {
+    font-weight: 500;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.today-change-item .code {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-left: 8px;
+}
+
+.today-change-item .change {
+    font-weight: 600;
+}
+
+.today-change-item .change.positive {
+    color: var(--danger-color);
+}
+
+.today-change-item .change.negative {
+    color: var(--success-color);
+}
+
+.home-trade-list {
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+.home-trade-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.home-trade-item:last-child {
+    border-bottom: none;
+}
+
+.home-trade-item .info {
+    display: flex;
+    flex-direction: column;
+}
+
+.home-trade-item .fund-name {
+    font-weight: 500;
+}
+
+.home-trade-item .trade-info {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.home-trade-item .amount {
+    font-weight: 600;
+}
+
+.home-trade-item .amount.buy {
+    color: var(--danger-color);
+}
+
+.home-trade-item .amount.sell {
+    color: var(--success-color);
+}
+
+.home-holding-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.home-holding-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    margin-bottom: 4px;
+}
+
+.home-holding-item:hover {
+    background-color: #f5f5f5;
+}
+
+.home-holding-item .info {
+    display: flex;
+    flex-direction: column;
+}
+
+.home-holding-item .name {
+    font-weight: 500;
+}
+
+.home-holding-item .code {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.home-holding-item .holding-info {
+    text-align: right;
+}
+
+.home-holding-item .market-value {
+    font-weight: 600;
+}
+
+.home-holding-item .profit {
+    font-size: 12px;
+}
+
+.home-holding-item .profit.positive {
+    color: var(--danger-color);
+}
+
+.home-holding-item .profit.negative {
+    color: var(--success-color);
+}
+
+.no-data {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 20px;
+}

@@ -16,6 +16,7 @@
             <span class="title">基金投资管理工具</span>
         </div>
         <div class="header-right">
+            <button class="btn btn-secondary" onclick="showHomePage()">🏠 首页</button>
             <button class="btn btn-primary" onclick="showAddFundModal()">+ 添加基金</button>
             <button class="btn btn-secondary" onclick="refreshAll()">🔄 刷新</button>
             <button class="btn btn-secondary" onclick="showSettingsModal()">⚙️ 设置</button>
@@ -66,7 +67,80 @@
 
         <!-- 右侧详情区域 -->
         <main class="content">
-            <div id="no-selection" class="no-selection">
+            <!-- 首页视图 -->
+            <div id="home-page" class="home-page">
+                <!-- 资产总览卡片 -->
+                <div class="home-summary-card">
+                    <div class="home-summary-item">
+                        <span class="label">总投入</span>
+                        <span class="value" id="home-total-cost">¥0.00</span>
+                    </div>
+                    <div class="home-summary-item">
+                        <span class="label">总市值</span>
+                        <span class="value" id="home-total-market">¥0.00</span>
+                    </div>
+                    <div class="home-summary-item highlight">
+                        <span class="label">总盈亏</span>
+                        <span class="value" id="home-total-profit">¥0.00</span>
+                        <span class="sub-value" id="home-profit-rate">0.00%</span>
+                    </div>
+                    <div class="home-summary-item">
+                        <span class="label">持仓基金</span>
+                        <span class="value" id="home-fund-count">0</span>
+                        <span class="sub-label">只</span>
+                    </div>
+                </div>
+
+                <div class="home-grid">
+                    <!-- 持仓分布图 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>持仓分布</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="home-pie-chart" class="home-chart-container"></div>
+                        </div>
+                    </div>
+
+                    <!-- 今日涨跌 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>今日涨跌</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="home-today-change" class="today-change-list">
+                                <!-- 动态加载 -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 近期交易 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>近期交易</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="home-recent-trades" class="home-trade-list">
+                                <!-- 动态加载 -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 持仓基金 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>持仓基金</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="home-holding-list" class="home-holding-list">
+                                <!-- 动态加载 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="no-selection" class="no-selection" style="display: none;">
                 <p>👈 请选择一只基金查看详情</p>
             </div>
 

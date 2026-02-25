@@ -2,18 +2,22 @@
 
 let currentFundCode = null;
 let chart = null;
+let homePieChart = null;
 let currentPeriod = '1y';
+let currentView = 'home'; // 'home' or 'detail'
 
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
     initApp();
     initChart();
+    initHomePieChart();
     bindEvents();
 });
 
 function initApp() {
     loadFundList();
     loadHoldingsSummary();
+    loadHomePage();
 }
 
 function bindEvents() {
@@ -28,6 +32,311 @@ function bindEvents() {
             }
         });
     });
+}
+
+// 初始化首页饼图
+function initHomePieChart() {
+    homePieChart = echarts.init(document.getElementById('home-pie-chart'));
+    
+    window.addEventListener('resize', () => {
+        homePieChart?.resize();
+    });
+}
+
+// 显示首页
+function showHomePage() {
+    currentView = 'home';
+    currentFundCode = null;
+    
+    document.getElementById('home-page').style.display = 'block';
+    document.getElementById('no-selection').style.display = 'none';
+    document.getElementById('fund-detail').style.display = 'none';
+    
+    // 更新基金列表选中状态
+    document.querySelectorAll('.fund-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    
+    // 刷新首页数据
+    loadHomePage();
+    
+    // 饼图 resize
+    setTimeout(() => {
+        if (homePieChart) {
+            homePieChart.resize();
+        }
+    }, 100);
+}
+
+// 显示基金详情
+function showFundDetail() {
+    currentView = 'detail';
+    
+    document.getElementById('home-page').style.display = 'none';
+    document.getElementById('no-selection').style.display = 'none';
+    document.getElementById('fund-detail').style.display = 'block';
+    
+    // 确保 ECharts 正确渲染
+    setTimeout(() => {
+        if (chart) {
+            chart.resize();
+        }
+    }, 100);
+}
+
+// 加载首页数据
+async function loadHomePage() {
+    if (currentView !== 'home') return;
+    
+    await Promise.all([
+        loadHomeSummary(),
+        loadHomePieChart(),
+        loadHomeTodayChange(),
+        loadHomeRecentTrades(),
+        loadHomeHoldings()
+    ]);
+}
+
+// 加载首页汇总数据
+async function loadHomeSummary() {
+    try {
+        const summary = await holdingAPI.getSummary();
+        
+        document.getElementById('home-total-cost').textContent = formatCurrency(summary.total_cost);
+        document.getElementById('home-total-market').textContent = formatCurrency(summary.total_market_value);
+        
+        const profitEl = document.getElementById('home-total-profit');
+        const profitRateEl = document.getElementById('home-profit-rate');
+        
+        profitEl.textContent = formatCurrency(summary.total_profit);
+        profitRateEl.textContent = formatPercent(summary.profit_rate);
+        
+        profitEl.classList.remove('text-red', 'text-green');
+        profitRateEl.classList.remove('text-red', 'text-green');
+        
+        if (summary.total_profit > 0) {
+            profitEl.classList.add('text-red');
+            profitRateEl.classList.add('text-red');
+        } else if (summary.total_profit < 0) {
+            profitEl.classList.add('text-green');
+            profitRateEl.classList.add('text-green');
+        }
+        
+        document.getElementById('home-fund-count').textContent = summary.fund_count;
+        
+    } catch (error) {
+        console.error('加载首页汇总失败:', error);
+    }
+}
+
+// 加载持仓分布饼图
+async function loadHomePieChart() {
+    try {
+        const funds = await fundAPI.getAll();
+        const holdings = (funds.data || []).filter(f => f.total_shares && parseFloat(f.total_shares) > 0);
+        
+        if (holdings.length === 0) {
+            homePieChart.setOption({
+                title: {
+                    text: '暂无持仓',
+                    left: 'center',
+                    top: 'center',
+                    textStyle: { color: '#999' }
+                }
+            });
+            return;
+        }
+        
+        const data = holdings.map(f => {
+            const shares = parseFloat(f.total_shares) || 0;
+            const netValue = parseFloat(f.last_net_value) || 0;
+            return {
+                name: f.fund_name || f.fund_code,
+                value: Math.round(shares * netValue)
+            };
+        });
+        
+        const option = {
+            tooltip: {
+                trigger: 'item',
+                formatter: '{b}: ¥{c} ({d}%)'
+            },
+            legend: {
+                orient: 'vertical',
+                right: 10,
+                top: 'center',
+                itemWidth: 10,
+                itemHeight: 10,
+                textStyle: { fontSize: 12 }
+            },
+            series: [{
+                type: 'pie',
+                radius: ['40%', '70%'],
+                center: ['35%', '50%'],
+                avoidLabelOverlap: false,
+                itemStyle: {
+                    borderRadius: 6,
+                    borderColor: '#fff',
+                    borderWidth: 2
+                },
+                label: {
+                    show: false
+                },
+                emphasis: {
+                    label: {
+                        show: true,
+                        fontSize: 14,
+                        fontWeight: 'bold'
+                    }
+                },
+                data: data
+            }]
+        };
+        
+        homePieChart.setOption(option, true);
+        
+    } catch (error) {
+        console.error('加载饼图失败:', error);
+    }
+}
+
+// 加载今日涨跌
+async function loadHomeTodayChange() {
+    try {
+        const funds = await fundAPI.getAll();
+        const holdings = (funds.data || []).filter(f => f.total_shares && parseFloat(f.total_shares) > 0);
+        
+        const container = document.getElementById('home-today-change');
+        
+        if (holdings.length === 0) {
+            container.innerHTML = '<div class="no-data">暂无持仓</div>';
+            return;
+        }
+        
+        // 按涨跌幅排序
+        holdings.sort((a, b) => (b.last_growth_rate || 0) - (a.last_growth_rate || 0));
+        
+        container.innerHTML = holdings.map(fund => {
+            const growthRate = fund.last_growth_rate;
+            const growthClass = growthRate > 0 ? 'positive' : growthRate < 0 ? 'negative' : '';
+            const growthText = growthRate ? `${growthRate > 0 ? '+' : ''}${growthRate.toFixed(2)}%` : '-';
+            
+            return `
+                <div class="today-change-item" onclick="selectFundFromHome('${fund.fund_code}')">
+                    <div>
+                        <span class="name">${fund.fund_name || '-'}</span>
+                        <span class="code">${fund.fund_code}</span>
+                    </div>
+                    <span class="change ${growthClass}">${growthText}</span>
+                </div>
+            `;
+        }).join('');
+        
+    } catch (error) {
+        console.error('加载今日涨跌失败:', error);
+    }
+}
+
+// 加载近期交易
+async function loadHomeRecentTrades() {
+    try {
+        const result = await tradeAPI.getAll(null, 5);
+        const trades = result.data || [];
+        
+        const container = document.getElementById('home-recent-trades');
+        
+        if (trades.length === 0) {
+            container.innerHTML = '<div class="no-data">暂无交易记录</div>';
+            return;
+        }
+        
+        container.innerHTML = trades.map(trade => {
+            const isBuy = trade.trade_type === 'BUY';
+            const typeText = isBuy ? '买入' : '卖出';
+            const typeClass = isBuy ? 'buy' : 'sell';
+            
+            return `
+                <div class="home-trade-item" onclick="selectFundFromHome('${trade.fund_code}')">
+                    <div class="info">
+                        <span class="fund-name">${trade.fund_name || trade.fund_code}</span>
+                        <span class="trade-info">${trade.trade_date} · ${typeText}</span>
+                    </div>
+                    <span class="amount ${typeClass}">${isBuy ? '-' : '+'}¥${parseFloat(trade.amount).toFixed(2)}</span>
+                </div>
+            `;
+        }).join('');
+        
+    } catch (error) {
+        console.error('加载近期交易失败:', error);
+    }
+}
+
+// 加载持仓基金列表
+async function loadHomeHoldings() {
+    try {
+        const funds = await fundAPI.getAll();
+        const holdings = (funds.data || []).filter(f => f.total_shares && parseFloat(f.total_shares) > 0);
+        
+        const container = document.getElementById('home-holding-list');
+        
+        if (holdings.length === 0) {
+            container.innerHTML = '<div class="no-data">暂无持仓</div>';
+            return;
+        }
+        
+        // 按市值排序
+        holdings.sort((a, b) => {
+            const valueA = parseFloat(a.total_shares) * parseFloat(a.last_net_value || 0);
+            const valueB = parseFloat(b.total_shares) * parseFloat(b.last_net_value || 0);
+            return valueB - valueA;
+        });
+        
+        container.innerHTML = holdings.map(fund => {
+            const shares = parseFloat(fund.total_shares) || 0;
+            const netValue = parseFloat(fund.last_net_value) || 0;
+            const totalCost = parseFloat(fund.total_cost) || 0;
+            const marketValue = shares * netValue;
+            const profit = marketValue - totalCost;
+            const profitRate = totalCost ? (profit / totalCost * 100) : 0;
+            
+            const profitClass = profit > 0 ? 'positive' : profit < 0 ? 'negative' : '';
+            
+            return `
+                <div class="home-holding-item" onclick="selectFundFromHome('${fund.fund_code}')">
+                    <div class="info">
+                        <span class="name">${fund.fund_name || '-'}</span>
+                        <span class="code">${fund.fund_code}</span>
+                    </div>
+                    <div class="holding-info">
+                        <span class="market-value">${formatCurrency(marketValue)}</span>
+                        <span class="profit ${profitClass}">${formatCurrency(profit)} (${formatPercent(profitRate)})</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+    } catch (error) {
+        console.error('加载持仓列表失败:', error);
+    }
+}
+
+// 从首页选择基金
+async function selectFundFromHome(fundCode) {
+    currentFundCode = fundCode;
+    
+    // 更新列表选中状态
+    document.querySelectorAll('.fund-item').forEach(item => {
+        item.classList.remove('active');
+        if (item.getAttribute('onclick')?.includes(fundCode)) {
+            item.classList.add('active');
+        }
+    });
+    
+    showFundDetail();
+    
+    await loadFundDetail(fundCode);
+    await loadChart(fundCode, currentPeriod);
+    await loadTradePreview(fundCode);
 }
 
 // 加载基金列表
@@ -107,21 +416,11 @@ async function selectFund(fundCode) {
     });
     event.currentTarget?.classList.add('active');
     
-    // 显示详情区域
-    document.getElementById('no-selection').style.display = 'none';
-    document.getElementById('fund-detail').style.display = 'block';
+    showFundDetail();
     
     // 加载基金详情
     await loadFundDetail(fundCode);
     await loadChart(fundCode, currentPeriod);
-    
-    // 确保 ECharts 正确渲染（容器从隐藏变为显示后需要 resize）
-    setTimeout(() => {
-        if (chart) {
-            chart.resize();
-        }
-    }, 100);
-    
     await loadTradePreview(fundCode);
 }
 
