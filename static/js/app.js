@@ -240,8 +240,8 @@ async function loadChart(fundCode, period) {
                     'MA5': false,
                     'MA10': false,
                     'MA20': false,
-                    '买入': false,
-                    '卖出': false
+                    '买入': true,
+                    '卖出': true
                 }
             },
             grid: {

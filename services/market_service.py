@@ -341,7 +341,7 @@ class MarketService:
         indicators["rsi"] = [float(v) if v else None for v in rsi]
         
         # 获取交易记录，用于在图表上标记买卖点
-        trades = MarketService.get_trades_for_chart(fund_code, start_date, end_date, dates)
+        trades = MarketService.get_trades_for_chart(fund_code, start_date, end_date, dates, values)
         
         return {
             "fund_code": fund_code,
@@ -356,16 +356,17 @@ class MarketService:
         fund_code: str,
         start_date: Optional[date],
         end_date: Optional[date],
-        chart_dates: List
+        chart_dates: List,
+        chart_values: List[float] = None
     ) -> dict:
         """获取交易记录用于图表显示"""
         with get_db_context() as conn:
-            sql = """SELECT trade_type, trade_date, confirm_net_value, amount 
+            sql = """SELECT trade_type, trade_date, confirm_date, confirm_net_value, amount 
                      FROM trades WHERE fund_code = ?"""
             params = [fund_code]
             
             if start_date:
-                sql += " AND trade_date >= ?"
+                sql += " AND confirm_date >= ?"
                 params.append(start_date)
             if end_date:
                 sql += " AND trade_date <= ?"
@@ -380,19 +381,26 @@ class MarketService:
             sell_points = []
             
             for row in rows:
-                trade_date = str(row["trade_date"])
+                # 使用交易日期（购买时间）来定位买卖点
+                match_date = str(row["trade_date"])
+                
                 # 在图表日期中找到对应的索引
-                if trade_date in chart_dates:
-                    idx = chart_dates.index(trade_date)
-                    point = {
-                        "date": trade_date,
-                        "value": float(row["confirm_net_value"]) if row["confirm_net_value"] else None,
-                        "amount": float(row["amount"]) if row["amount"] else None
-                    }
-                    if row["trade_type"] == "BUY":
-                        buy_points.append([idx, point["value"]])
+                if match_date in chart_dates:
+                    idx = chart_dates.index(match_date)
+                    
+                    # 获取净值：优先使用确认净值，否则从图表数据中获取
+                    if row["confirm_net_value"]:
+                        value = float(row["confirm_net_value"])
+                    elif chart_values and idx < len(chart_values):
+                        value = chart_values[idx]
                     else:
-                        sell_points.append([idx, point["value"]])
+                        value = None
+                    
+                    if value is not None:
+                        if row["trade_type"] == "BUY":
+                            buy_points.append([idx, value])
+                        else:
+                            sell_points.append([idx, value])
             
             return {
                 "buy": buy_points,
