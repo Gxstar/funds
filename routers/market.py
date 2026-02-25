@@ -68,15 +68,7 @@ async def sync_fund(fund_code: str, force: bool = False):
 @router.post("/sync-all")
 async def sync_all_funds():
     """同步所有基金数据"""
-    from services.fund_service import FundService
-    import asyncio
+    from services.sync_scheduler import scheduler
     
-    funds = FundService.get_all_funds()
-    results = []
-    
-    for fund in funds:
-        result = await MarketService.sync_fund_history(fund["fund_code"])
-        results.append(result)
-        await asyncio.sleep(1.5)  # 限流
-    
+    results = await scheduler.sync_all_funds()
     return {"results": results}

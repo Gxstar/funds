@@ -79,20 +79,25 @@ class SyncScheduler:
         """同步所有持仓基金"""
         try:
             funds = FundService.get_all_funds()
+            results = []
             
             for fund in funds:
                 try:
                     result = await MarketService.sync_fund_history(fund["fund_code"])
                     logger.info(f"同步基金 {fund['fund_code']}: {result.get('status')}")
+                    results.append(result)
                 except Exception as e:
                     logger.error(f"同步基金 {fund['fund_code']} 失败: {e}")
+                    results.append({"fund_code": fund["fund_code"], "status": "failed", "error": str(e)})
                 
                 # 限流
                 await asyncio.sleep(1.5)
             
             logger.info("所有基金同步完成")
+            return results
         except Exception as e:
             logger.error(f"批量同步失败: {e}")
+            return []
     
     async def sync_on_startup(self):
         """启动时同步"""
