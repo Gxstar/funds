@@ -1089,6 +1089,72 @@ function formatMarkdownSimple(text) {
         .replace(/\n/g, '<br>');
 }
 
+// AI 持仓组合分析
+async function analyzePortfolio() {
+    const summaryEl = document.getElementById('portfolio-summary');
+    const contentEl = document.getElementById('portfolio-analysis-content');
+    
+    // 显示模态框和加载状态
+    showModal('portfolio-analysis-modal');
+    summaryEl.innerHTML = '';
+    contentEl.innerHTML = '<div class="loading-wrapper"><div class="loading"></div><span>正在分析您的持仓组合，请稍候...</span></div>';
+    
+    try {
+        const result = await aiAPI.analyze();
+        
+        if (result.error) {
+            contentEl.innerHTML = `<p style="color: #ff4d4f; text-align: center; padding: 20px;">${result.error}</p>`;
+            return;
+        }
+        
+        // 显示汇总信息
+        if (result.summary) {
+            const summary = result.summary;
+            summaryEl.innerHTML = `
+                <div class="summary-row">
+                    <div class="summary-item">
+                        <span class="label">持有基金</span>
+                        <span class="value">${summary.fund_count} 只</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="label">总投入</span>
+                        <span class="value">${formatCurrency(summary.total_cost)}</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="label">总市值</span>
+                        <span class="value">${formatCurrency(summary.total_market_value)}</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="label">总盈亏</span>
+                        <span class="value ${summary.total_profit > 0 ? 'text-red' : summary.total_profit < 0 ? 'text-green' : ''}">${formatCurrency(summary.total_profit)} (${formatPercent(summary.profit_rate)})</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="label">账户仓位</span>
+                        <span class="value">${summary.position_ratio.toFixed(1)}%</span>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 显示分析结果
+        if (result.analysis) {
+            const analysisHtml = typeof marked !== 'undefined' 
+                ? marked.parse(result.analysis) 
+                : formatMarkdownSimple(result.analysis);
+            
+            contentEl.innerHTML = `<div class="markdown-body">${analysisHtml}</div>`;
+        }
+        
+    } catch (error) {
+        contentEl.innerHTML = `<p style="color: #ff4d4f; text-align: center; padding: 20px;">分析失败: ${error.message}</p>`;
+    }
+}
+
+// 关闭持仓分析（保留兼容性）
+function closePortfolioAnalysis() {
+    closeModal('portfolio-analysis-modal');
+}
+
 // 删除基金
 async function deleteFund() {
     if (!currentFundCode) return;

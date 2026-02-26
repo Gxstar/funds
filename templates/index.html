@@ -91,6 +91,13 @@
                     </div>
                 </div>
 
+                <!-- 持仓分析按钮 -->
+                <div class="home-action-bar">
+                    <button class="btn btn-primary" onclick="analyzePortfolio()">
+                        🤖 AI 持仓分析
+                    </button>
+                </div>
+
                 <div class="home-grid">
                     <!-- 持仓分布图 -->
                     <div class="card">
@@ -495,6 +502,24 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeModal('settings-modal')">取消</button>
                 <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 持仓分析结果弹窗 -->
+    <div id="portfolio-analysis-modal" class="modal">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3>🤖 AI 持仓分析报告</h3>
+                <span class="close" onclick="closeModal('portfolio-analysis-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <!-- 汇总信息 -->
+                <div id="portfolio-summary" class="portfolio-summary">
+                </div>
+                <!-- 分析结果 -->
+                <div id="portfolio-analysis-content" class="portfolio-analysis-content">
+                </div>
             </div>
         </div>
     </div>
