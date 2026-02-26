@@ -12,7 +12,8 @@ from routers import (
     holdings_router,
     trades_router,
     market_router,
-    ai_router
+    ai_router,
+    etf_router
 )
 from services.sync_scheduler import scheduler
 
@@ -61,6 +62,7 @@ app.include_router(holdings_router)
 app.include_router(trades_router)
 app.include_router(market_router)
 app.include_router(ai_router)
+app.include_router(etf_router)
 
 # 静态文件
 app.mount("/static", StaticFiles(directory="static"), name="static")

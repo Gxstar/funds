@@ -72,7 +72,7 @@ class FundService:
     @staticmethod
     def update_fund(fund_code: str, **kwargs) -> Optional[dict]:
         """更新基金信息"""
-        allowed_fields = ["fund_name", "fund_type", "risk_level", 
+        allowed_fields = ["fund_name", "fund_type", "risk_level", "related_etf", 
                          "last_price_date", "last_net_value", "last_growth_rate"]
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
         

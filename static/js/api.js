@@ -178,3 +178,21 @@ const aiAPI = {
         body: data,
     }),
 };
+
+// ETF 相关 API
+const etfAPI = {
+    // 获取 ETF 实时行情
+    getRealtime: (code) => request(`${API_BASE}/etf/realtime/${code}`),
+    
+    // 获取 ETF 资金流向
+    getMoneyFlow: (code) => request(`${API_BASE}/etf/money-flow/${code}`),
+    
+    // 获取 ETF 分析数据
+    getAnalysis: (code) => request(`${API_BASE}/etf/analysis/${code}`),
+    
+    // 获取推荐 ETF
+    getRecommended: (fundType) => request(`${API_BASE}/etf/recommend/${encodeURIComponent(fundType)}`),
+    
+    // 获取基金关联 ETF 数据
+    getFundETF: (fundCode) => request(`${API_BASE}/etf/fund/${fundCode}`),
+};

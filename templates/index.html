@@ -158,6 +158,7 @@
                         <h2 id="fund-name">基金名称</h2>
                         <div class="card-header-actions">
                             <span id="fund-code" class="fund-code">000000</span>
+                            <button class="btn btn-sm btn-secondary" onclick="showSetETFModal()">设置ETF</button>
                             <button class="btn btn-sm btn-danger" onclick="deleteFund()">删除基金</button>
                         </div>
                     </div>
@@ -179,50 +180,101 @@
                                 <span class="label">日涨跌幅</span>
                                 <span class="value" id="growth-rate">-</span>
                             </div>
+                            <div class="info-item">
+                                <span class="label">关联ETF</span>
+                                <span class="value" id="related-etf">-</span>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 持仓信息卡片 -->
-                <div class="card" id="holding-card">
-                    <div class="card-header">
-                        <h3>持仓信息</h3>
-                        <button class="btn btn-sm btn-secondary" onclick="showTradeHistory()">交易记录</button>
-                    </div>
-                    <div class="card-body">
-                        <!-- 无持仓时显示 -->
-                        <div id="no-holding">
-                            <p style="color: #999; margin-bottom: 16px;">暂无持仓，点击买入开始投资</p>
+                <!-- 持仓与ETF并排布局 -->
+                <div class="holding-etf-row">
+                    <!-- 持仓信息卡片 -->
+                    <div class="card holding-card-flex" id="holding-card">
+                        <div class="card-header">
+                            <h3>持仓信息</h3>
+                            <button class="btn btn-sm btn-secondary" onclick="showTradeHistory()">交易记录</button>
                         </div>
-                        <!-- 有持仓时显示 -->
-                        <div id="has-holding" style="display: none;">
-                            <div class="info-grid">
-                                <div class="info-item">
-                                    <span class="label">持有份额</span>
-                                    <span class="value" id="shares">-</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="label">成本价</span>
-                                    <span class="value" id="cost-price">-</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="label">当前市值</span>
-                                    <span class="value" id="market-value">-</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="label">盈亏金额</span>
-                                    <span class="value" id="profit">-</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="label">盈亏比例</span>
-                                    <span class="value" id="profit-ratio">-</span>
+                        <div class="card-body">
+                            <!-- 无持仓时显示 -->
+                            <div id="no-holding">
+                                <p style="color: #999; margin-bottom: 16px;">暂无持仓，点击买入开始投资</p>
+                            </div>
+                            <!-- 有持仓时显示 -->
+                            <div id="has-holding" style="display: none;">
+                                <div class="info-grid">
+                                    <div class="info-item">
+                                        <span class="label">持有份额</span>
+                                        <span class="value" id="shares">-</span>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="label">成本价</span>
+                                        <span class="value" id="cost-price">-</span>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="label">当前市值</span>
+                                        <span class="value" id="market-value">-</span>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="label">盈亏金额</span>
+                                        <span class="value" id="profit">-</span>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="label">盈亏比例</span>
+                                        <span class="value" id="profit-ratio">-</span>
+                                    </div>
                                 </div>
                             </div>
+                            <div class="action-buttons">
+                                <button class="btn btn-primary" onclick="showTradeModal('BUY')">买入</button>
+                                <button class="btn btn-danger" id="sell-btn" onclick="showTradeModal('SELL')" style="display: none;">卖出</button>
+                                <button class="btn btn-secondary" onclick="showSetHoldingModal()">设置持仓</button>
+                            </div>
                         </div>
-                        <div class="action-buttons">
-                            <button class="btn btn-primary" onclick="showTradeModal('BUY')">买入</button>
-                            <button class="btn btn-danger" id="sell-btn" onclick="showTradeModal('SELL')" style="display: none;">卖出</button>
-                            <button class="btn btn-secondary" onclick="showSetHoldingModal()">设置持仓</button>
+                    </div>
+
+                    <!-- ETF 实时行情卡片 -->
+                    <div class="card etf-card-flex" id="etf-card" style="display: none;">
+                        <div class="card-header">
+                            <h3>📈 关联ETF实时行情</h3>
+                            <span id="etf-update-time" class="etf-time"></span>
+                        </div>
+                        <div class="card-body">
+                            <div class="etf-realtime-grid">
+                                <div class="etf-item">
+                                    <span class="label">ETF代码</span>
+                                    <span class="value" id="etf-code">-</span>
+                                </div>
+                                <div class="etf-item">
+                                    <span class="label">ETF名称</span>
+                                    <span class="value" id="etf-name">-</span>
+                                </div>
+                                <div class="etf-item">
+                                    <span class="label">当前价格</span>
+                                    <span class="value" id="etf-price">-</span>
+                                </div>
+                                <div class="etf-item">
+                                    <span class="label">当日涨跌</span>
+                                    <span class="value" id="etf-change">-</span>
+                                </div>
+                                <div class="etf-item">
+                                    <span class="label">今开/昨收</span>
+                                    <span class="value" id="etf-open-close">-</span>
+                                </div>
+                                <div class="etf-item">
+                                    <span class="label">最高/最低</span>
+                                    <span class="value" id="etf-high-low">-</span>
+                                </div>
+                                <div class="etf-item">
+                                    <span class="label">主力净流入</span>
+                                    <span class="value" id="etf-main-flow">-</span>
+                                </div>
+                                <div class="etf-item">
+                                    <span class="label">交易状态</span>
+                                    <span class="value" id="etf-status">-</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -458,6 +510,34 @@
                 <button class="btn btn-secondary" onclick="closeModal('set-holding-modal')">取消</button>
                 <button class="btn btn-danger" onclick="clearHolding()">清空持仓</button>
                 <button class="btn btn-primary" onclick="saveHolding()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 设置关联ETF弹窗 -->
+    <div id="set-etf-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>设置关联ETF</h3>
+                <span class="close" onclick="closeModal('set-etf-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p style="color: #666; margin-bottom: 16px; font-size: 13px;">关联场内ETF可获取当日实时行情，辅助盘中决策</p>
+                <div class="form-group">
+                    <label>推荐ETF</label>
+                    <div id="recommended-etfs" class="recommended-etfs">
+                        <!-- 动态加载 -->
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>ETF代码</label>
+                    <input type="text" id="set-etf-code" placeholder="输入6位ETF代码，如 515030">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('set-etf-modal')">取消</button>
+                <button class="btn btn-danger" onclick="clearETF()">清除关联</button>
+                <button class="btn btn-primary" onclick="saveETF()">保存</button>
             </div>
         </div>
     </div>

@@ -186,6 +186,40 @@ class AIService:
         else:
             position_info = "未设置满仓金额（可在设置中配置）"
         
+        # 获取关联 ETF 数据
+        etf_info = "暂无关联 ETF"
+        etf_data = None
+        related_etf = fund.get("related_etf")
+        
+        if related_etf:
+            try:
+                from services.etf_service import ETFService
+                etf_data = await ETFService.get_etf_analysis_data(related_etf)
+                
+                if etf_data and etf_data.get("available"):
+                    realtime = etf_data.get("realtime", {})
+                    money_flow = etf_data.get("money_flow", {})
+                    
+                    etf_info = f"""- 关联 ETF: {related_etf} ({realtime.get('name', '-')})
+- 当日价格: {realtime.get('current_price', '-')}
+- 当日涨跌幅: {realtime.get('change_pct', 0):.2f}%
+- 今开: {realtime.get('open', '-')} | 最高: {realtime.get('high', '-')} | 最低: {realtime.get('low', '-')}
+- 昨收: {realtime.get('pre_close', '-')}"""
+                    
+                    if money_flow:
+                        main_inflow = money_flow.get('main_net_inflow', 0)
+                        main_inflow_pct = money_flow.get('main_net_inflow_pct', 0)
+                        etf_info += f"""
+- 主力净流入: {main_inflow:,.0f} 元 ({main_inflow_pct:.2f}%)"""
+                    
+                    if realtime.get('is_trading'):
+                        etf_info += "\n- 状态: 交易中（实时数据）"
+                    else:
+                        etf_info += "\n- 状态: 非交易时间（最近收盘数据）"
+            except Exception as e:
+                logger.error(f"获取 ETF 数据失败: {e}")
+                etf_info = f"关联 ETF {related_etf} 数据获取失败"
+        
         # 从配置文件加载提示词
         system_prompt, user_prompt_template = get_fund_analysis_prompts()
         
@@ -203,6 +237,7 @@ class AIService:
             ma20=get_latest(indicators.get("ma20", [])),
             rsi=get_latest(indicators.get("rsi", [])),
             macd=get_latest(indicators.get("macd", {}).get("macd", [])),
+            etf_info=etf_info,
             holding_info=holding_info,
             position_info=position_info
         )

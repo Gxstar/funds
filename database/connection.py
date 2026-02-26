@@ -60,6 +60,7 @@ def init_db() -> None:
                 fund_name VARCHAR(100) NOT NULL,
                 fund_type VARCHAR(50),
                 risk_level VARCHAR(10),
+                related_etf VARCHAR(20),
                 last_price_date DATE,
                 last_net_value DECIMAL(10,4),
                 last_growth_rate DECIMAL(8,4),
@@ -155,3 +156,14 @@ def init_db() -> None:
                 INSERT INTO settings (key, value) VALUES (%s, %s)
                 ON CONFLICT (key) DO NOTHING
             """, (key, value))
+        
+        # 为现有表添加新字段（如果不存在）
+        cursor.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                               WHERE table_name = 'funds' AND column_name = 'related_etf') THEN
+                    ALTER TABLE funds ADD COLUMN related_etf VARCHAR(20);
+                END IF;
+            END $$;
+        """)

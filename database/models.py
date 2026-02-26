@@ -13,6 +13,7 @@ class Fund:
     fund_name: str = ""
     fund_type: Optional[str] = None
     risk_level: Optional[str] = None
+    related_etf: Optional[str] = None
     last_price_date: Optional[date] = None
     last_net_value: Optional[Decimal] = None
     last_growth_rate: Optional[Decimal] = None
@@ -27,6 +28,7 @@ class Fund:
             fund_name=row.get("fund_name", ""),
             fund_type=row.get("fund_type"),
             risk_level=row.get("risk_level"),
+            related_etf=row.get("related_etf"),
             last_price_date=row.get("last_price_date"),
             last_net_value=Decimal(str(row["last_net_value"])) if row.get("last_net_value") else None,
             last_growth_rate=Decimal(str(row["last_growth_rate"])) if row.get("last_growth_rate") else None,

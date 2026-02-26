@@ -527,11 +527,130 @@ async function loadFundDetail(fundCode) {
             sellBtn.style.display = 'none';
         }
         
+        // 显示关联 ETF
+        const relatedETFEl = document.getElementById('related-etf');
+        if (fund.related_etf) {
+            relatedETFEl.innerHTML = `<span class="etf-link" onclick="showSetETFModal()">${fund.related_etf}</span>`;
+            
+            // 先显示 ETF 卡片（加载状态）
+            const etfCard = document.getElementById('etf-card');
+            etfCard.style.display = 'block';
+            document.getElementById('etf-code').textContent = fund.related_etf;
+            document.getElementById('etf-name').textContent = '加载中...';
+            document.getElementById('etf-price').textContent = '-';
+            document.getElementById('etf-change').textContent = '-';
+            document.getElementById('etf-open-close').textContent = '- / -';
+            document.getElementById('etf-high-low').textContent = '- / -';
+            document.getElementById('etf-main-flow').textContent = '-';
+            document.getElementById('etf-status').innerHTML = '<span style="color: #999;">加载中...</span>';
+            
+            // 加载 ETF 实时数据
+            loadETFData(fund.related_etf);
+        } else {
+            relatedETFEl.innerHTML = `<span style="color: #999;">未设置</span>`;
+            document.getElementById('etf-card').style.display = 'none';
+        }
+        
         // 更新 AI 分析结果显示（根据缓存）
         updateAIDisplay(fundCode);
         
     } catch (error) {
         console.error('加载基金详情失败:', error);
+    }
+}
+
+// 加载 ETF 实时数据
+async function loadETFData(etfCode) {
+    const etfCard = document.getElementById('etf-card');
+    
+    try {
+        const data = await etfAPI.getAnalysis(etfCode);
+        
+        if (!data.available) {
+            // 数据完全不可用时，仍显示卡片但提示
+            document.getElementById('etf-code').textContent = etfCode;
+            document.getElementById('etf-name').textContent = '未知ETF';
+            document.getElementById('etf-price').textContent = '-';
+            document.getElementById('etf-change').textContent = '-';
+            document.getElementById('etf-open-close').textContent = '- / -';
+            document.getElementById('etf-high-low').textContent = '- / -';
+            document.getElementById('etf-main-flow').textContent = '-';
+            document.getElementById('etf-status').innerHTML = '<span style="color: #faad14;">数据暂不可用</span>';
+            document.getElementById('etf-update-time').textContent = '';
+            return;
+        }
+        
+        const realtime = data.realtime || {};
+        const moneyFlow = data.money_flow || {};
+        const basicInfo = data.basic_info || {};
+        
+        // 更新 ETF 信息
+        document.getElementById('etf-code').textContent = etfCode;
+        document.getElementById('etf-name').textContent = realtime.name || basicInfo.name || '-';
+        
+        if (realtime.current_price) {
+            // 有实时数据
+            document.getElementById('etf-price').textContent = realtime.current_price || '-';
+            
+            // 涨跌幅
+            const changeEl = document.getElementById('etf-change');
+            const changePct = realtime.change_pct || 0;
+            changeEl.textContent = `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`;
+            changeEl.className = 'value ' + (changePct > 0 ? 'text-red' : changePct < 0 ? 'text-green' : '');
+            
+            // 今开/昨收
+            document.getElementById('etf-open-close').textContent = 
+                `${realtime.open || '-'} / ${realtime.pre_close || '-'}`;
+            
+            // 最高/最低
+            document.getElementById('etf-high-low').textContent = 
+                `${realtime.high || '-'} / ${realtime.low || '-'}`;
+            
+            // 主力净流入
+            const mainFlowEl = document.getElementById('etf-main-flow');
+            if (moneyFlow.main_net_inflow !== undefined) {
+                const flow = moneyFlow.main_net_inflow;
+                const flowPct = moneyFlow.main_net_inflow_pct || 0;
+                mainFlowEl.textContent = `${flow >= 0 ? '+' : ''}${(flow / 10000).toFixed(2)}万 (${flowPct.toFixed(2)}%)`;
+                mainFlowEl.className = 'value ' + (flow > 0 ? 'text-red' : flow < 0 ? 'text-green' : '');
+            } else {
+                mainFlowEl.textContent = '-';
+            }
+            
+            // 交易状态
+            const statusEl = document.getElementById('etf-status');
+            if (realtime.is_trading) {
+                statusEl.innerHTML = '<span style="color: #52c41a;">● 交易中</span>';
+            } else {
+                statusEl.innerHTML = '<span style="color: #999;">○ 已收盘</span>';
+            }
+            
+            // 更新时间
+            document.getElementById('etf-update-time').textContent = 
+                realtime.update_time ? `更新: ${new Date(realtime.update_time).toLocaleTimeString()}` : '';
+        } else {
+            // 只有基本信息，无实时数据（非交易时间或数据源问题）
+            document.getElementById('etf-price').textContent = '-';
+            document.getElementById('etf-change').textContent = '-';
+            document.getElementById('etf-open-close').textContent = '- / -';
+            document.getElementById('etf-high-low').textContent = '- / -';
+            document.getElementById('etf-main-flow').textContent = '-';
+            document.getElementById('etf-status').innerHTML = '<span style="color: #999;">○ 已收盘</span>';
+            document.getElementById('etf-update-time').textContent = '';
+        }
+        
+    } catch (error) {
+        console.error('加载 ETF 数据失败:', error);
+        // 获取失败时仍显示卡片，但显示错误信息
+        document.getElementById('etf-code').textContent = etfCode;
+        document.getElementById('etf-name').textContent = '获取失败';
+        document.getElementById('etf-price').textContent = '-';
+        document.getElementById('etf-change').textContent = '-';
+        document.getElementById('etf-open-close').textContent = '- / -';
+        document.getElementById('etf-high-low').textContent = '- / -';
+        document.getElementById('etf-main-flow').textContent = '-';
+        document.getElementById('etf-status').innerHTML = '<span style="color: #ff4d4f;">获取数据失败</span>';
+        document.getElementById('etf-update-time').textContent = '';
     }
 }
 
@@ -1423,3 +1542,85 @@ document.addEventListener('click', (e) => {
         document.getElementById('search-results').classList.remove('show');
     }
 });
+
+
+// ========== ETF 关联功能 ==========
+
+// 显示设置 ETF 弹窗
+async function showSetETFModal() {
+    try {
+        const fund = await fundAPI.get(currentFundCode);
+        const fundType = fund.fund_type || '';
+        
+        // 获取推荐 ETF
+        const recommendedContainer = document.getElementById('recommended-etfs');
+        if (fundType) {
+            try {
+                const recommended = await etfAPI.getRecommended(fundType);
+                if (recommended.recommended_etfs && recommended.recommended_etfs.length > 0) {
+                    recommendedContainer.innerHTML = recommended.recommended_etfs.map(code => 
+                        `<div class="recommended-etf-item" onclick="selectRecommendedETF('${code}')">${code}</div>`
+                    ).join('');
+                } else {
+                    recommendedContainer.innerHTML = '<span style="color: #999;">暂无推荐</span>';
+                }
+            } catch {
+                recommendedContainer.innerHTML = '<span style="color: #999;">获取推荐失败</span>';
+            }
+        } else {
+            recommendedContainer.innerHTML = '<span style="color: #999;">请先设置基金类型</span>';
+        }
+        
+        // 填充当前 ETF
+        document.getElementById('set-etf-code').value = fund.related_etf || '';
+        
+        showModal('set-etf-modal');
+    } catch (error) {
+        console.error('加载 ETF 设置失败:', error);
+    }
+}
+
+// 选择推荐的 ETF
+function selectRecommendedETF(code) {
+    document.getElementById('set-etf-code').value = code;
+    
+    // 更新选中状态
+    document.querySelectorAll('.recommended-etf-item').forEach(item => {
+        item.classList.remove('selected');
+        if (item.textContent === code) {
+            item.classList.add('selected');
+        }
+    });
+}
+
+// 保存 ETF 关联
+async function saveETF() {
+    const etfCode = document.getElementById('set-etf-code').value.trim();
+    
+    try {
+        await fundAPI.update(currentFundCode, { related_etf: etfCode || null });
+        closeModal('set-etf-modal');
+        
+        // 刷新基金详情
+        await loadFundDetail(currentFundCode);
+        
+        showToast('ETF 关联设置成功', 'success');
+    } catch (error) {
+        showToast('保存失败: ' + error.message, 'error');
+    }
+}
+
+// 清除 ETF 关联
+async function clearETF() {
+    try {
+        await fundAPI.update(currentFundCode, { related_etf: null });
+        closeModal('set-etf-modal');
+        
+        // 刷新基金详情
+        await loadFundDetail(currentFundCode);
+        
+        showToast('已清除 ETF 关联', 'success');
+    } catch (error) {
+        showToast('清除失败: ' + error.message, 'error');
+    }
+}

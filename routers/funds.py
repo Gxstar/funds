@@ -20,6 +20,7 @@ class FundUpdate(BaseModel):
     fund_name: Optional[str] = None
     fund_type: Optional[str] = None
     risk_level: Optional[str] = None
+    related_etf: Optional[str] = None
 
 
 @router.get("")
