@@ -6,6 +6,9 @@ let homePieChart = null;
 let currentPeriod = '1y';
 let currentView = 'home'; // 'home' or 'detail'
 
+// AI 分析结果缓存 { fundCode: { analysis, indicators, timestamp } }
+const aiAnalysisCache = {};
+
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
     initApp();
@@ -246,6 +249,7 @@ async function loadHomeTodayChange() {
             const growthRate = fund.last_growth_rate;
             const growthClass = growthRate > 0 ? 'positive' : growthRate < 0 ? 'negative' : '';
             const growthText = growthRate ? `${growthRate > 0 ? '+' : ''}${growthRate.toFixed(2)}%` : '-';
+            const dateStr = fund.last_price_date ? `<span class="date">${fund.last_price_date}</span>` : '';
             
             return `
                 <div class="today-change-item" onclick="selectFundFromHome('${fund.fund_code}')">
@@ -253,7 +257,10 @@ async function loadHomeTodayChange() {
                         <span class="name">${fund.fund_name || '-'}</span>
                         <span class="code">${fund.fund_code}</span>
                     </div>
-                    <span class="change ${growthClass}">${growthText}</span>
+                    <div class="change-wrapper">
+                        ${dateStr}
+                        <span class="change ${growthClass}">${growthText}</span>
+                    </div>
                 </div>
             `;
         }).join('');
@@ -383,6 +390,7 @@ async function loadFundList() {
             const growthRate = fund.last_growth_rate;
             const growthClass = growthRate > 0 ? 'positive' : growthRate < 0 ? 'negative' : '';
             const growthText = growthRate ? `${growthRate > 0 ? '+' : ''}${growthRate.toFixed(2)}%` : '-';
+            const dateStr = fund.last_price_date || '';
             
             return `
                 <div class="fund-item ${fund.fund_code === currentFundCode ? 'active' : ''}" 
@@ -391,6 +399,7 @@ async function loadFundList() {
                     <div class="info">
                         <span class="code">${fund.fund_code}</span>
                         <span class="growth ${growthClass}">${growthText}</span>
+                        ${dateStr ? `<span class="growth-date">${dateStr}</span>` : ''}
                     </div>
                 </div>
             `;
@@ -464,7 +473,8 @@ async function loadFundDetail(fundCode) {
         
         const growthEl = document.getElementById('growth-rate');
         if (fund.last_growth_rate !== null && fund.last_growth_rate !== undefined) {
-            growthEl.textContent = formatPercent(fund.last_growth_rate);
+            const dateStr = fund.last_price_date ? ` (${fund.last_price_date})` : '';
+            growthEl.textContent = formatPercent(fund.last_growth_rate) + dateStr;
             growthEl.className = 'value ' + (fund.last_growth_rate > 0 ? 'text-red' : fund.last_growth_rate < 0 ? 'text-green' : '');
         } else {
             growthEl.textContent = '-';
@@ -517,9 +527,61 @@ async function loadFundDetail(fundCode) {
             sellBtn.style.display = 'none';
         }
         
+        // 更新 AI 分析结果显示（根据缓存）
+        updateAIDisplay(fundCode);
+        
     } catch (error) {
         console.error('加载基金详情失败:', error);
     }
+}
+
+// 更新 AI 分析结果显示
+function updateAIDisplay(fundCode) {
+    const resultEl = document.getElementById('ai-result');
+    const cache = aiAnalysisCache[fundCode];
+    
+    if (cache) {
+        // 显示缓存的分析结果
+        const timeStr = cache.timestamp ? formatDateTime(cache.timestamp) : '';
+        let html = '';
+        
+        if (timeStr) {
+            html += `<div class="ai-analysis-time">分析时间: ${timeStr}</div>`;
+        }
+        
+        if (typeof marked !== 'undefined') {
+            html += `<div class="markdown-body">${marked.parse(cache.analysis)}</div>`;
+        } else {
+            html += formatMarkdownSimple(cache.analysis);
+        }
+        
+        resultEl.innerHTML = html;
+        
+        // 更新指标
+        if (cache.indicators) {
+            if (cache.indicators.ma5) document.getElementById('ai-ma5').textContent = cache.indicators.ma5;
+            if (cache.indicators.ma10) document.getElementById('ai-ma10').textContent = cache.indicators.ma10;
+            if (cache.indicators.ma20) document.getElementById('ai-ma20').textContent = cache.indicators.ma20;
+            if (cache.indicators.rsi) document.getElementById('ai-rsi').textContent = cache.indicators.rsi;
+            if (cache.indicators.macd) document.getElementById('ai-macd').textContent = cache.indicators.macd;
+        }
+    } else {
+        // 没有缓存，显示默认提示
+        resultEl.innerHTML = '<p class="placeholder">点击"分析"按钮获取 AI 建议</p>';
+    }
+}
+
+// 格式化日期时间
+function formatDateTime(isoString) {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    return date.toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
 }
 
 // 初始化图表
@@ -1035,24 +1097,46 @@ async function deleteTrade(tradeId) {
 
 // 获取 AI 建议
 async function getAISuggestion() {
+    const fundCode = currentFundCode;
     const resultEl = document.getElementById('ai-result');
-    resultEl.innerHTML = '<div class="loading"></div> 分析中...';
+    
+    // 显示加载状态和分析开始时间
+    const startTime = new Date();
+    const startTimeStr = formatDateTime(startTime.toISOString());
+    resultEl.innerHTML = `<div class="ai-analysis-time">分析开始: ${startTimeStr}</div><div class="loading"></div> 分析中...`;
     
     try {
-        const result = await aiAPI.suggest(currentFundCode);
+        const result = await aiAPI.suggest(fundCode);
+        
+        // 检查是否还在当前基金页面
+        if (currentFundCode !== fundCode) {
+            return; // 已切换到其他基金，不更新显示
+        }
         
         if (result.error) {
             resultEl.innerHTML = `<p style="color: #ff4d4f;">${result.error}</p>`;
             return;
         }
         
+        // 缓存分析结果
+        aiAnalysisCache[fundCode] = {
+            analysis: result.analysis,
+            indicators: result.indicators,
+            timestamp: result.timestamp || new Date().toISOString()
+        };
+        
+        // 显示分析结果和时间
+        const timeStr = formatDateTime(aiAnalysisCache[fundCode].timestamp);
+        let html = `<div class="ai-analysis-time">分析时间: ${timeStr}</div>`;
+        
         // 使用 marked.js 渲染 Markdown
         if (typeof marked !== 'undefined') {
-            resultEl.innerHTML = `<div class="markdown-body">${marked.parse(result.analysis)}</div>`;
+            html += `<div class="markdown-body">${marked.parse(result.analysis)}</div>`;
         } else {
-            // 如果 marked 不可用，简单格式化
-            resultEl.innerHTML = formatMarkdownSimple(result.analysis);
+            html += formatMarkdownSimple(result.analysis);
         }
+        
+        resultEl.innerHTML = html;
         
         // 更新指标
         if (result.indicators) {

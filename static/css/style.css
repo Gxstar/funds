@@ -286,6 +286,12 @@ body {
     color: var(--success-color);
 }
 
+.fund-item .growth-date {
+    font-size: 11px;
+    color: #999;
+    margin-left: 4px;
+}
+
 /* 右侧内容区 */
 .content {
     flex: 1;
@@ -442,6 +448,17 @@ body {
 .ai-result .placeholder {
     color: var(--text-secondary);
     text-align: center;
+}
+
+/* AI 分析时间 */
+.ai-analysis-time {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    padding: 4px 8px;
+    background: #f0f0f0;
+    border-radius: 4px;
+    display: inline-block;
 }
 
 /* Markdown 样式 */
@@ -870,6 +887,17 @@ body {
 
 .today-change-item .change.negative {
     color: var(--success-color);
+}
+
+.today-change-item .change-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.today-change-item .date {
+    font-size: 11px;
+    color: #999;
 }
 
 .home-trade-list {

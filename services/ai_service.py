@@ -5,64 +5,45 @@ from decimal import Decimal
 from typing import Optional, List
 import logging
 import httpx
+import json
+from pathlib import Path
 
 from utils.helpers import get_setting, get_total_position_amount
 
 logger = logging.getLogger(__name__)
 
-
-ANALYSIS_PROMPT = """你是一位专业的基金投资顾问。请根据以下数据分析该基金的投资建议。
-
-## 基金基本信息
-- 基金名称: {fund_name}
-- 基金代码: {fund_code}
-- 基金类型: {fund_type}
-- 风险等级: {risk_level}
-
-## 技术指标数据
-- 当前净值: {current_value}
-- 近5日涨跌幅: {change_5d}%
-- 近20日涨跌幅: {change_20d}%
-- MA5: {ma5}
-- MA10: {ma10}
-- MA20: {ma20}
-- RSI(14): {rsi}
-- MACD: {macd}
-
-## 持仓信息（如有）
-{holding_info}
-
-## 账户仓位信息
-{position_info}
-
-## 请回答
-1. 当前技术面分析（趋势判断、支撑压力位）
-2. 买卖建议（强烈买入/买入/持有/卖出/强烈卖出）
-3. 建议理由（分点说明，简洁明了）
-4. 风险提示
-5. 仓位建议（注意：账户仓位比例是整个投资组合的总仓位，请综合考虑该基金在组合中的占比给出建议）
-
-请用简洁专业的语言回答，不要过于冗长。回复格式使用 Markdown。
-"""
+# 提示词配置文件路径
+PROMPTS_FILE = Path(__file__).parent.parent / "config" / "prompts.json"
 
 
-PORTFOLIO_ANALYSIS_PROMPT = """你是一位专业的基金投资顾问。请根据以下数据对整个持仓组合进行综合分析。
+def load_prompts() -> dict:
+    """加载提示词配置"""
+    try:
+        with open(PROMPTS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"加载提示词配置失败: {e}")
+        return {}
 
-## 账户整体情况
-{account_summary}
 
-## 持仓明细
-{holdings_detail}
+def get_fund_analysis_prompts() -> tuple:
+    """获取基金分析提示词"""
+    prompts = load_prompts()
+    fund_prompts = prompts.get("fund_analysis", {})
+    return (
+        fund_prompts.get("system_prompt", "你是专业的基金投资顾问，擅长技术分析和量化分析。"),
+        fund_prompts.get("user_prompt", "")
+    )
 
-## 请回答
-1. 组合整体分析（仓位是否合理、风险分散程度、资产配置建议）
-2. 各基金点评（针对每只基金的简要评价和建议）
-3. 调仓建议（是否需要调整各基金的配置比例）
-4. 操作策略（近期市场环境下的具体操作建议）
-5. 风险提示
 
-请用简洁专业的语言回答，不要过于冗长。回复格式使用 Markdown。
-"""
+def get_portfolio_analysis_prompts() -> tuple:
+    """获取持仓组合分析提示词"""
+    prompts = load_prompts()
+    portfolio_prompts = prompts.get("portfolio_analysis", {})
+    return (
+        portfolio_prompts.get("system_prompt", "你是专业的基金投资顾问，擅长投资组合分析和资产配置。"),
+        portfolio_prompts.get("user_prompt", "")
+    )
 
 
 class DeepSeekClient:
@@ -205,8 +186,11 @@ class AIService:
         else:
             position_info = "未设置满仓金额（可在设置中配置）"
         
+        # 从配置文件加载提示词
+        system_prompt, user_prompt_template = get_fund_analysis_prompts()
+        
         # 构建提示词
-        prompt = ANALYSIS_PROMPT.format(
+        prompt = user_prompt_template.format(
             fund_name=fund.get("fund_name", ""),
             fund_code=fund_code,
             fund_type=fund.get("fund_type", "未知"),
@@ -226,7 +210,7 @@ class AIService:
         try:
             model = get_setting("deepseek_model") or "deepseek-chat"
             analysis = await client.chat([
-                {"role": "system", "content": "你是专业的基金投资顾问，擅长技术分析和量化分析。"},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ], model=model)
             
@@ -346,8 +330,11 @@ class AIService:
         
         holdings_detail = "\n\n".join(holdings_detail_list)
         
+        # 从配置文件加载提示词
+        system_prompt, user_prompt_template = get_portfolio_analysis_prompts()
+        
         # 构建提示词
-        prompt = PORTFOLIO_ANALYSIS_PROMPT.format(
+        prompt = user_prompt_template.format(
             account_summary=account_summary,
             holdings_detail=holdings_detail
         )
@@ -355,7 +342,7 @@ class AIService:
         try:
             model = get_setting("deepseek_model") or "deepseek-chat"
             analysis = await client.chat([
-                {"role": "system", "content": "你是专业的基金投资顾问，擅长投资组合分析和资产配置。"},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ], model=model)
             
