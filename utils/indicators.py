@@ -256,3 +256,188 @@ def calculate_boll(
         "middle": middle,
         "lower": lower
     }
+
+
+def calculate_max_drawdown(prices: list[Decimal]) -> dict:
+    """计算最大回撤
+    
+    最大回撤 = (峰值 - 谷值) / 峰值
+    
+    Args:
+        prices: 价格列表（按时间顺序）
+    
+    Returns:
+        {
+            "max_drawdown": 最大回撤比例,
+            "max_drawdown_pct": 最大回撤百分比,
+            "peak_date_index": 峰值位置索引,
+            "trough_date_index": 谷值位置索引
+        }
+    """
+    if len(prices) < 2:
+        return {
+            "max_drawdown": Decimal("0"),
+            "max_drawdown_pct": Decimal("0"),
+            "peak_date_index": 0,
+            "trough_date_index": 0
+        }
+    
+    max_drawdown = Decimal("0")
+    peak = prices[0]
+    peak_idx = 0
+    trough_idx = 0
+    max_peak_idx = 0
+    
+    for i in range(1, len(prices)):
+        if prices[i] > peak:
+            peak = prices[i]
+            peak_idx = i
+        else:
+            drawdown = (peak - prices[i]) / peak
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
+                trough_idx = i
+                max_peak_idx = peak_idx
+    
+    return {
+        "max_drawdown": max_drawdown,
+        "max_drawdown_pct": max_drawdown * 100,
+        "peak_date_index": max_peak_idx,
+        "trough_date_index": trough_idx
+    }
+
+
+def calculate_volatility(prices: list[Decimal], annualize: bool = True) -> dict:
+    """计算波动率（标准差）
+    
+    Args:
+        prices: 价格列表
+        annualize: 是否年化（假设一年约 252 个交易日）
+    
+    Returns:
+        {
+            "daily_volatility": 日波动率,
+            "daily_volatility_pct": 日波动率百分比,
+            "annualized_volatility": 年化波动率（如果 annualize=True）,
+            "annualized_volatility_pct": 年化波动率百分比
+        }
+    """
+    if len(prices) < 2:
+        return {
+            "daily_volatility": Decimal("0"),
+            "daily_volatility_pct": Decimal("0"),
+            "annualized_volatility": None,
+            "annualized_volatility_pct": None
+        }
+    
+    # 计算日收益率
+    returns = []
+    for i in range(1, len(prices)):
+        if prices[i - 1] != 0:
+            ret = (prices[i] - prices[i - 1]) / prices[i - 1]
+            returns.append(ret)
+    
+    if not returns:
+        return {
+            "daily_volatility": Decimal("0"),
+            "daily_volatility_pct": Decimal("0"),
+            "annualized_volatility": None,
+            "annualized_volatility_pct": None
+        }
+    
+    # 计算标准差
+    mean_return = sum(returns) / len(returns)
+    variance = sum((r - mean_return) ** 2 for r in returns) / len(returns)
+    daily_vol = Decimal(str(math.sqrt(float(variance))))
+    
+    result = {
+        "daily_volatility": daily_vol,
+        "daily_volatility_pct": daily_vol * 100,
+        "annualized_volatility": None,
+        "annualized_volatility_pct": None
+    }
+    
+    if annualize:
+        # 年化波动率 = 日波动率 * sqrt(252)
+        annualized = daily_vol * Decimal(str(math.sqrt(252)))
+        result["annualized_volatility"] = annualized
+        result["annualized_volatility_pct"] = annualized * 100
+    
+    return result
+
+
+def calculate_sharpe_ratio(
+    prices: list[Decimal],
+    risk_free_rate: Decimal = Decimal("0.015")  # 默认年化无风险利率 1.5%
+) -> dict:
+    """计算夏普比率
+    
+    夏普比率 = (年化收益率 - 无风险利率) / 年化波动率
+    
+    Args:
+        prices: 价格列表
+        risk_free_rate: 年化无风险利率（默认 1.5%）
+    
+    Returns:
+        {
+            "total_return": 总收益率,
+            "annualized_return": 年化收益率,
+            "sharpe_ratio": 夏普比率
+        }
+    """
+    if len(prices) < 2:
+        return {
+            "total_return": Decimal("0"),
+            "annualized_return": Decimal("0"),
+            "sharpe_ratio": None
+        }
+    
+    # 总收益率
+    total_return = (prices[-1] - prices[0]) / prices[0]
+    
+    # 年化收益率（假设数据为日频，计算实际天数）
+    days = len(prices) - 1
+    if days > 0:
+        annualized_return = ((1 + total_return) ** (252 / days)) - 1
+    else:
+        annualized_return = Decimal("0")
+    
+    # 获取年化波动率
+    vol_data = calculate_volatility(prices, annualize=True)
+    annualized_vol = vol_data.get("annualized_volatility")
+    
+    # 计算夏普比率
+    sharpe = None
+    if annualized_vol and annualized_vol > 0:
+        sharpe = (annualized_return - risk_free_rate) / annualized_vol
+    
+    return {
+        "total_return": total_return,
+        "total_return_pct": total_return * 100,
+        "annualized_return": annualized_return,
+        "annualized_return_pct": annualized_return * 100,
+        "sharpe_ratio": sharpe
+    }
+
+
+def calculate_risk_metrics(prices: list[Decimal]) -> dict:
+    """计算综合风险指标
+    
+    Args:
+        prices: 价格列表
+    
+    Returns:
+        包含最大回撤、波动率、夏普比率等指标的字典
+    """
+    drawdown = calculate_max_drawdown(prices)
+    volatility = calculate_volatility(prices)
+    sharpe = calculate_sharpe_ratio(prices)
+    
+    return {
+        "max_drawdown_pct": float(drawdown["max_drawdown_pct"]),
+        "daily_volatility_pct": float(volatility["daily_volatility_pct"]),
+        "annualized_volatility_pct": float(volatility["annualized_volatility_pct"]) if volatility["annualized_volatility_pct"] else None,
+        "total_return_pct": float(sharpe["total_return_pct"]),
+        "annualized_return_pct": float(sharpe["annualized_return_pct"]),
+        "sharpe_ratio": float(sharpe["sharpe_ratio"]) if sharpe["sharpe_ratio"] else None,
+    }

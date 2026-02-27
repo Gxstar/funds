@@ -107,3 +107,43 @@ async def update_position_setting(setting: PositionSettingUpdate):
         return {"message": "仓位设置已保存", "total_position_amount": str(amount)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/market-sentiment")
+async def get_market_sentiment():
+    """获取市场情绪数据"""
+    from services.market_sentiment_service import MarketSentimentService
+    
+    try:
+        data = await MarketSentimentService.get_market_sentiment()
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/fund-detail/{fund_code}")
+async def get_fund_detail(fund_code: str):
+    """获取基金详情（经理、规模、成立时间等）"""
+    from services.fund_detail_service import FundDetailService
+    
+    try:
+        data = await FundDetailService.get_fund_detail(fund_code)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/news")
+async def get_fund_news(fund_type: str = None, related_etf: str = None, max_news: int = 5):
+    """获取基金相关新闻"""
+    from services.news_service import NewsService
+    
+    try:
+        news = await NewsService.get_fund_related_news(
+            fund_type=fund_type,
+            related_etf_name=related_etf,
+            max_news=min(max_news, 10)
+        )
+        return {"data": news}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

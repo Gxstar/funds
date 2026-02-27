@@ -52,7 +52,7 @@ class DeepSeekClient:
     def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com/v1"):
         self.api_key = api_key
         self.base_url = base_url
-        self.timeout = 60.0
+        self.timeout = 120.0  # 增加到 120 秒
     
     async def chat(
         self,
@@ -76,7 +76,18 @@ class DeepSeekClient:
             )
             response.raise_for_status()
             result = response.json()
-            return result["choices"][0]["message"]["content"]
+            
+            # 检查响应格式
+            if "choices" not in result or len(result["choices"]) == 0:
+                logger.error(f"API 响应格式异常: {result}")
+                raise ValueError("API 响应格式异常")
+            
+            content = result["choices"][0].get("message", {}).get("content")
+            if not content:
+                logger.error(f"API 响应内容为空: {result}")
+                raise ValueError("API 响应内容为空")
+            
+            return content
 
 
 class AIService:
@@ -110,6 +121,11 @@ class AIService:
         # 获取基金数据
         from services.fund_service import FundService
         from services.market_service import MarketService
+        from services.market_sentiment_service import MarketSentimentService
+        from services.fund_detail_service import FundDetailService, ValuationService
+        from utils.indicators import calculate_risk_metrics
+        from decimal import Decimal
+        import asyncio
         
         fund = FundService.get_fund_by_code(fund_code)
         if not fund:
@@ -142,6 +158,15 @@ class AIService:
                     return round(v, 4)
             return None
         
+        # 计算风险指标
+        risk_metrics = None
+        if len(values) >= 20:
+            try:
+                price_decimals = [Decimal(str(v)) for v in values]
+                risk_metrics = calculate_risk_metrics(price_decimals)
+            except Exception as e:
+                logger.warning(f"计算风险指标失败: {e}")
+        
         # 持仓信息
         holding = FundService.get_holding(fund_code)
         if holding:
@@ -164,7 +189,6 @@ class AIService:
         total_position = get_total_position_amount()
         if total_position > 0:
             # 获取总市值
-            from services.fund_service import FundService
             summary = FundService.get_holdings_summary()
             total_market_value = Decimal(str(summary.get("total_market_value", 0)))
             position_ratio = float(total_market_value / total_position * 100) if total_position else 0
@@ -220,6 +244,48 @@ class AIService:
                 logger.error(f"获取 ETF 数据失败: {e}")
                 etf_info = f"关联 ETF {related_etf} 数据获取失败"
         
+        # 获取市场情绪数据
+        try:
+            sentiment_data = await MarketSentimentService.get_market_sentiment()
+            market_sentiment_info = MarketSentimentService.format_sentiment_for_ai(sentiment_data)
+        except Exception as e:
+            logger.warning(f"获取市场情绪失败: {e}")
+            market_sentiment_info = "市场情绪数据暂不可用"
+        
+        # 获取基金详情
+        try:
+            fund_detail = await FundDetailService.get_fund_detail(fund_code)
+            fund_detail_info = FundDetailService.format_detail_for_ai(fund_detail)
+        except Exception as e:
+            logger.warning(f"获取基金详情失败: {e}")
+            fund_detail_info = "基金详情数据暂不可用"
+        
+        # 获取相关新闻
+        try:
+            from services.news_service import NewsService
+            etf_name = None
+            if etf_data and etf_data.get("realtime"):
+                etf_name = etf_data["realtime"].get("name")
+            news_list = await NewsService.get_fund_related_news(
+                fund_type=fund.get("fund_type"),
+                related_etf_name=etf_name,
+                max_news=3
+            )
+            news_info = NewsService.format_news_for_ai(news_list)
+        except Exception as e:
+            logger.warning(f"获取新闻失败: {e}")
+            news_info = "相关新闻暂不可用"
+        
+        # 格式化风险指标
+        risk_info = "风险指标数据不足"
+        if risk_metrics:
+            risk_info = f"""- 最大回撤: {risk_metrics['max_drawdown_pct']:.2f}%
+- 日波动率: {risk_metrics['daily_volatility_pct']:.2f}%
+- 年化波动率: {risk_metrics['annualized_volatility_pct']:.2f}%" if risk_metrics.get('annualized_volatility_pct') else "- 年化波动率: 数据不足"
+- 近6月总收益: {risk_metrics['total_return_pct']:.2f}%
+- 年化收益率: {risk_metrics['annualized_return_pct']:.2f}%
+- 夏普比率: {risk_metrics['sharpe_ratio']:.2f}" if risk_metrics.get('sharpe_ratio') else "- 夏普比率: 数据不足\""""
+        
         # 从配置文件加载提示词
         system_prompt, user_prompt_template = get_fund_analysis_prompts()
         
@@ -239,7 +305,11 @@ class AIService:
             macd=get_latest(indicators.get("macd", {}).get("macd", [])),
             etf_info=etf_info,
             holding_info=holding_info,
-            position_info=position_info
+            position_info=position_info,
+            market_sentiment=market_sentiment_info,
+            fund_detail=fund_detail_info,
+            risk_metrics=risk_info,
+            related_news=news_info
         )
         
         try:
@@ -259,6 +329,7 @@ class AIService:
                     "rsi": get_latest(indicators.get("rsi", [])),
                     "macd": get_latest(indicators.get("macd", {}).get("macd", [])),
                 },
+                "risk_metrics": risk_metrics,
                 "change_5d": round(change_5d, 2),
                 "change_20d": round(change_20d, 2),
                 "timestamp": datetime.now().isoformat()
@@ -275,11 +346,17 @@ class AIService:
                 "fund_code": fund_code,
                 "error": error_msg
             }
-        except Exception as e:
-            logger.error(f"AI 分析失败: {e}")
+        except httpx.TimeoutException as e:
+            logger.error(f"AI 分析超时: {e}")
             return {
                 "fund_code": fund_code,
-                "error": f"分析失败: {str(e)}"
+                "error": "API 请求超时，请稍后重试"
+            }
+        except Exception as e:
+            logger.error(f"AI 分析失败: {type(e).__name__}: {e}")
+            return {
+                "fund_code": fund_code,
+                "error": f"分析失败: {str(e) or type(e).__name__}"
             }
     
     @staticmethod
@@ -404,8 +481,13 @@ class AIService:
             return {
                 "error": error_msg
             }
-        except Exception as e:
-            logger.error(f"AI 分析失败: {e}")
+        except httpx.TimeoutException as e:
+            logger.error(f"AI 分析超时: {e}")
             return {
-                "error": f"分析失败: {str(e)}"
+                "error": "API 请求超时，请稍后重试"
+            }
+        except Exception as e:
+            logger.error(f"AI 分析失败: {type(e).__name__}: {e}")
+            return {
+                "error": f"分析失败: {str(e) or type(e).__name__}"
             }
