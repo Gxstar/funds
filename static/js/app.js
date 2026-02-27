@@ -367,9 +367,12 @@ async function selectFundFromHome(fundCode) {
     
     showFundDetail();
     
-    await loadFundDetail(fundCode);
-    await loadChart(fundCode, currentPeriod);
-    await loadTradePreview(fundCode);
+    // 并行加载基金详情、净值曲线、交易预览
+    await Promise.all([
+        loadFundDetail(fundCode),
+        loadChart(fundCode, currentPeriod),
+        loadTradePreview(fundCode)
+    ]);
 }
 
 // 加载基金列表
@@ -453,10 +456,12 @@ async function selectFund(fundCode) {
     
     showFundDetail();
     
-    // 加载基金详情
-    await loadFundDetail(fundCode);
-    await loadChart(fundCode, currentPeriod);
-    await loadTradePreview(fundCode);
+    // 并行加载基金详情、净值曲线、交易预览
+    await Promise.all([
+        loadFundDetail(fundCode),
+        loadChart(fundCode, currentPeriod),
+        loadTradePreview(fundCode)
+    ]);
 }
 
 // 加载基金详情
@@ -625,9 +630,17 @@ async function loadETFData(etfCode) {
                 statusEl.innerHTML = '<span style="color: #999;">○ 已收盘</span>';
             }
             
-            // 更新时间
-            document.getElementById('etf-update-time').textContent = 
-                realtime.update_time ? `更新: ${new Date(realtime.update_time).toLocaleTimeString()}` : '';
+            // 更新时间（优先显示缓存时间）
+            const updateTimeEl = document.getElementById('etf-update-time');
+            if (realtime.cached_at) {
+                const cacheTime = new Date(realtime.cached_at);
+                updateTimeEl.textContent = `更新: ${cacheTime.toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'})}`;
+            } else if (realtime.update_time) {
+                const updateTime = new Date(realtime.update_time);
+                updateTimeEl.textContent = `更新: ${updateTime.toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'})}`;
+            } else {
+                updateTimeEl.textContent = '';
+            }
         } else {
             // 只有基本信息，无实时数据（非交易时间或数据源问题）
             document.getElementById('etf-price').textContent = '-';
