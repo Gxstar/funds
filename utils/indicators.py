@@ -398,7 +398,8 @@ def calculate_sharpe_ratio(
     # 年化收益率（假设数据为日频，计算实际天数）
     days = len(prices) - 1
     if days > 0:
-        annualized_return = ((1 + total_return) ** (252 / days)) - 1
+        # 使用 float 计算，避免 Decimal ** float 的类型错误
+        annualized_return = Decimal(str((1 + float(total_return)) ** (252 / days) - 1))
     else:
         annualized_return = Decimal("0")
     
