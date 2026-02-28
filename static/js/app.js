@@ -1637,3 +1637,250 @@ async function clearETF() {
         showToast('清除失败: ' + error.message, 'error');
     }
 }
+
+
+// ========== 设置侧边栏面板功能 ==========
+
+let promptVariables = {}; // 存储提示词变量说明
+let currentPromptTab = 'fund'; // 当前提示词标签页
+
+// 打开设置面板
+async function openSettingsPanel() {
+    // 先显示加载状态
+    document.getElementById('settings-overlay').classList.add('show');
+    document.getElementById('settings-panel').classList.add('show');
+    
+    // 加载所有设置数据
+    try {
+        await Promise.all([
+            loadPanelSettings(),
+            loadDatabaseConfig(),
+            loadPromptsConfig()
+        ]);
+    } catch (error) {
+        console.error('加载设置失败:', error);
+        showToast('加载设置失败', 'error');
+    }
+}
+
+// 关闭设置面板
+function closeSettingsPanel() {
+    document.getElementById('settings-overlay').classList.remove('show');
+    document.getElementById('settings-panel').classList.remove('show');
+}
+
+// 加载通用设置和 AI 设置
+async function loadPanelSettings() {
+    try {
+        const settings = await aiAPI.getSettings();
+        
+        // API Key
+        const apiKeyInput = document.getElementById('panel-api-key');
+        if (settings.api_key_configured) {
+            apiKeyInput.value = '';
+            apiKeyInput.placeholder = '已配置（留空保持不变）';
+        } else {
+            apiKeyInput.value = '';
+            apiKeyInput.placeholder = 'sk-...';
+        }
+        
+        document.getElementById('panel-base-url').value = settings.deepseek_base_url || '';
+        document.getElementById('panel-model').value = settings.deepseek_model || 'deepseek-chat';
+        document.getElementById('panel-total-position').value = settings.total_position_amount && settings.total_position_amount !== '0' ? settings.total_position_amount : '';
+        
+    } catch (error) {
+        console.error('加载设置失败:', error);
+    }
+}
+
+// 加载数据库配置
+async function loadDatabaseConfig() {
+    try {
+        const config = await settingsAPI.getDatabaseConfig();
+        
+        // 设置数据库类型选择
+        selectDbType(config.type, false);
+        
+        // 填充配置
+        if (config.type === 'sqlite') {
+            document.getElementById('panel-sqlite-path').value = config.sqlite?.path || '';
+        } else {
+            document.getElementById('panel-pg-host').value = config.postgresql?.host || '';
+            document.getElementById('panel-pg-port').value = config.postgresql?.port || '';
+            document.getElementById('panel-pg-name').value = config.postgresql?.name || '';
+            document.getElementById('panel-pg-user').value = config.postgresql?.user || '';
+            document.getElementById('panel-pg-password').value = '';
+            document.getElementById('panel-pg-password').placeholder = '留空保持不变';
+        }
+    } catch (error) {
+        console.error('加载数据库配置失败:', error);
+    }
+}
+
+// 选择数据库类型
+function selectDbType(type, animate = true) {
+    // 更新选中状态
+    document.querySelectorAll('.db-type-option').forEach(opt => {
+        opt.classList.remove('selected');
+        if (opt.dataset.type === type) {
+            opt.classList.add('selected');
+        }
+    });
+    
+    // 切换配置区域
+    document.getElementById('sqlite-config').style.display = type === 'sqlite' ? 'block' : 'none';
+    document.getElementById('postgresql-config').style.display = type === 'postgresql' ? 'block' : 'none';
+}
+
+// 加载提示词配置
+async function loadPromptsConfig() {
+    try {
+        const result = await settingsAPI.getPrompts();
+        const prompts = result.prompts;
+        promptVariables = result.variables || {};
+        
+        // 基金分析提示词
+        document.getElementById('panel-fund-system-prompt').value = prompts.fund_analysis?.system_prompt || '';
+        document.getElementById('panel-fund-user-prompt').value = prompts.fund_analysis?.user_prompt || '';
+        
+        // 持仓分析提示词
+        document.getElementById('panel-portfolio-system-prompt').value = prompts.portfolio_analysis?.system_prompt || '';
+        document.getElementById('panel-portfolio-user-prompt').value = prompts.portfolio_analysis?.user_prompt || '';
+        
+        // 渲染变量列表
+        renderVariableChips('fund', promptVariables.fund_analysis || {});
+        renderVariableChips('portfolio', promptVariables.portfolio_analysis || {});
+        
+    } catch (error) {
+        console.error('加载提示词配置失败:', error);
+    }
+}
+
+// 渲染变量标签
+function renderVariableChips(type, variables) {
+    const container = document.getElementById(`${type}-variables`);
+    if (!container || !variables) return;
+    
+    container.innerHTML = Object.entries(variables).map(([key, desc]) => `
+        <div class="variable-chip" onclick="insertVariable('${type}', '${key}')" title="${desc}">
+            <span class="var-name">{${key}}</span>
+            <span class="var-desc">${desc}</span>
+        </div>
+    `).join('');
+}
+
+// 插入变量到文本框
+function insertVariable(type, varName) {
+    const textareaId = type === 'fund' ? 'panel-fund-user-prompt' : 'panel-portfolio-user-prompt';
+    const textarea = document.getElementById(textareaId);
+    
+    if (textarea) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const text = textarea.value;
+        const variable = `{${varName}}`;
+        
+        textarea.value = text.substring(0, start) + variable + text.substring(end);
+        textarea.focus();
+        textarea.selectionStart = textarea.selectionEnd = start + variable.length;
+    }
+}
+
+// 切换提示词标签页
+function switchPromptTab(tab) {
+    currentPromptTab = tab;
+    
+    // 更新标签页样式
+    document.querySelectorAll('.prompt-tab').forEach(t => {
+        t.classList.remove('active');
+        if (t.dataset.tab === tab) {
+            t.classList.add('active');
+        }
+    });
+    
+    // 切换内容区域
+    document.getElementById('fund-prompt-content').style.display = tab === 'fund' ? 'block' : 'none';
+    document.getElementById('portfolio-prompt-content').style.display = tab === 'portfolio' ? 'block' : 'none';
+}
+
+// 保存所有设置
+async function saveAllSettings() {
+    try {
+        // 1. 保存 AI 设置
+        const apiKey = document.getElementById('panel-api-key').value.trim();
+        const baseUrl = document.getElementById('panel-base-url').value.trim();
+        const model = document.getElementById('panel-model').value;
+        const totalPosition = document.getElementById('panel-total-position').value.trim();
+        
+        const aiSettings = {};
+        if (apiKey) aiSettings.deepseek_api_key = apiKey;
+        if (baseUrl) aiSettings.deepseek_base_url = baseUrl;
+        if (model) aiSettings.deepseek_model = model;
+        
+        if (Object.keys(aiSettings).length > 0) {
+            await aiAPI.updateSettings(aiSettings);
+        }
+        
+        // 保存仓位设置
+        await aiAPI.updatePositionSetting({
+            total_position_amount: totalPosition || ''
+        });
+        
+        // 2. 保存数据库配置
+        const dbType = document.querySelector('.db-type-option.selected')?.dataset.type || 'postgresql';
+        const dbConfig = {
+            db_type: dbType,
+            sqlite_path: document.getElementById('panel-sqlite-path')?.value.trim() || 'data/funds.db',
+            pg_host: document.getElementById('panel-pg-host')?.value.trim(),
+            pg_port: document.getElementById('panel-pg-port')?.value.trim(),
+            pg_name: document.getElementById('panel-pg-name')?.value.trim(),
+            pg_user: document.getElementById('panel-pg-user')?.value.trim(),
+            pg_password: document.getElementById('panel-pg-password')?.value.trim()
+        };
+        
+        await settingsAPI.updateDatabaseConfig(dbConfig);
+        
+        // 3. 保存提示词配置
+        const promptsData = {
+            fund_analysis_system: document.getElementById('panel-fund-system-prompt').value,
+            fund_analysis_user: document.getElementById('panel-fund-user-prompt').value,
+            portfolio_analysis_system: document.getElementById('panel-portfolio-system-prompt').value,
+            portfolio_analysis_user: document.getElementById('panel-portfolio-user-prompt').value
+        };
+        
+        await settingsAPI.updatePrompts(promptsData);
+        
+        closeSettingsPanel();
+        showToast('所有设置已保存', 'success');
+        
+        // 刷新首页数据
+        if (currentView === 'home') {
+            loadHomeSummary();
+        }
+        
+    } catch (error) {
+        showToast('保存失败: ' + error.message, 'error');
+    }
+}
+
+// 重置提示词
+async function resetPrompts() {
+    if (!confirm('确定要重置提示词为默认配置吗？您的自定义修改将丢失。')) {
+        return;
+    }
+    
+    try {
+        const result = await settingsAPI.resetPrompts();
+        const prompts = result.prompts;
+        
+        // 更新文本框
+        document.getElementById('panel-fund-system-prompt').value = prompts.fund_analysis?.system_prompt || '';
+        document.getElementById('panel-fund-user-prompt').value = prompts.fund_analysis?.user_prompt || '';
+        document.getElementById('panel-portfolio-system-prompt').value = prompts.portfolio_analysis?.system_prompt || '';
+        document.getElementById('panel-portfolio-user-prompt').value = prompts.portfolio_analysis?.user_prompt || '';
+        
+        showToast('提示词已重置为默认配置', 'success');
+    } catch (error) {
+        showToast('重置失败: ' + error.message, 'error');
+    }
+}

@@ -196,3 +196,29 @@ const etfAPI = {
     // 获取基金关联 ETF 数据
     getFundETF: (fundCode) => request(`${API_BASE}/etf/fund/${fundCode}`),
 };
+
+// 设置相关 API
+const settingsAPI = {
+    // 获取提示词配置
+    getPrompts: () => request(`${API_BASE}/ai/prompts`),
+    
+    // 更新提示词配置
+    updatePrompts: (data) => request(`${API_BASE}/ai/prompts`, {
+        method: 'POST',
+        body: data,
+    }),
+    
+    // 重置提示词配置
+    resetPrompts: () => request(`${API_BASE}/ai/prompts/reset`, {
+        method: 'POST',
+    }),
+    
+    // 获取数据库配置
+    getDatabaseConfig: () => request(`${API_BASE}/ai/database-config`),
+    
+    // 更新数据库配置
+    updateDatabaseConfig: (data) => request(`${API_BASE}/ai/database-config`, {
+        method: 'POST',
+        body: data,
+    }),
+};

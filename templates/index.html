@@ -19,7 +19,7 @@
             <button class="btn btn-secondary" onclick="showHomePage()">🏠 首页</button>
             <button class="btn btn-primary" onclick="showAddFundModal()">+ 添加基金</button>
             <button class="btn btn-secondary" onclick="refreshAll()">🔄 刷新</button>
-            <button class="btn btn-secondary" onclick="showSettingsModal()">⚙️ 设置</button>
+            <button class="btn btn-secondary" onclick="openSettingsPanel()">⚙️ 设置</button>
         </div>
     </header>
 
@@ -582,6 +582,174 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeModal('settings-modal')">取消</button>
                 <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 设置侧边栏面板 -->
+    <div id="settings-overlay" class="settings-overlay" onclick="closeSettingsPanel()"></div>
+    <div id="settings-panel" class="settings-panel">
+        <div class="settings-header">
+            <h2>⚙️ 系统设置</h2>
+            <span class="settings-close" onclick="closeSettingsPanel()">&times;</span>
+        </div>
+        <div class="settings-body">
+            <!-- 通用设置 -->
+            <div class="settings-section">
+                <div class="settings-section-title">
+                    <span class="icon">📋</span>
+                    通用设置
+                </div>
+                <div class="setting-item">
+                    <label>满仓金额（元）</label>
+                    <input type="number" step="0.01" id="panel-total-position" placeholder="计划投资的总额">
+                    <p class="setting-hint">用于计算当前仓位比例，辅助 AI 分析决策</p>
+                </div>
+            </div>
+            
+            <!-- AI 设置 -->
+            <div class="settings-section">
+                <div class="settings-section-title">
+                    <span class="icon">🤖</span>
+                    AI 设置
+                </div>
+                <div class="setting-item">
+                    <label>API Key</label>
+                    <input type="password" id="panel-api-key" placeholder="sk-...">
+                </div>
+                <div class="setting-item">
+                    <label>API 地址</label>
+                    <input type="text" id="panel-base-url" placeholder="https://api.deepseek.com/v1">
+                </div>
+                <div class="setting-item">
+                    <label>模型</label>
+                    <select id="panel-model">
+                        <option value="deepseek-chat">deepseek-chat</option>
+                        <option value="deepseek-coder">deepseek-coder</option>
+                    </select>
+                </div>
+            </div>
+            
+            <!-- 数据库设置 -->
+            <div class="settings-section">
+                <div class="settings-section-title">
+                    <span class="icon">💾</span>
+                    数据库设置
+                </div>
+                <div class="db-type-selector">
+                    <div class="db-type-option" data-type="sqlite" onclick="selectDbType('sqlite')">
+                        <div class="icon">📁</div>
+                        <div class="name">SQLite</div>
+                        <div class="desc">本地文件数据库</div>
+                    </div>
+                    <div class="db-type-option" data-type="postgresql" onclick="selectDbType('postgresql')">
+                        <div class="icon">☁️</div>
+                        <div class="name">PostgreSQL</div>
+                        <div class="desc">云端数据库</div>
+                    </div>
+                </div>
+                
+                <!-- SQLite 配置 -->
+                <div id="sqlite-config" class="db-config-section" style="display: none;">
+                    <div class="setting-item">
+                        <label>数据文件路径</label>
+                        <input type="text" id="panel-sqlite-path" placeholder="data/funds.db">
+                        <p class="setting-hint">相对于项目根目录的路径</p>
+                    </div>
+                </div>
+                
+                <!-- PostgreSQL 配置 -->
+                <div id="postgresql-config" class="db-config-section">
+                    <div class="setting-item">
+                        <label>主机地址</label>
+                        <input type="text" id="panel-pg-host" placeholder="localhost">
+                    </div>
+                    <div class="setting-item">
+                        <label>端口</label>
+                        <input type="text" id="panel-pg-port" placeholder="5432">
+                    </div>
+                    <div class="setting-item">
+                        <label>数据库名</label>
+                        <input type="text" id="panel-pg-name" placeholder="funds">
+                    </div>
+                    <div class="setting-item">
+                        <label>用户名</label>
+                        <input type="text" id="panel-pg-user" placeholder="postgres">
+                    </div>
+                    <div class="setting-item">
+                        <label>密码</label>
+                        <input type="password" id="panel-pg-password" placeholder="数据库密码">
+                    </div>
+                </div>
+                <p class="setting-hint" style="margin-top: 12px;">
+                    ⚠️ 修改数据库配置后需要重启应用才能生效
+                </p>
+            </div>
+            
+            <!-- 提示词设置 -->
+            <div class="settings-section">
+                <div class="settings-section-title">
+                    <span class="icon">📝</span>
+                    提示词设置
+                </div>
+                <div class="prompt-editor">
+                    <div class="prompt-tabs">
+                        <div class="prompt-tab active" data-tab="fund" onclick="switchPromptTab('fund')">
+                            基金分析
+                        </div>
+                        <div class="prompt-tab" data-tab="portfolio" onclick="switchPromptTab('portfolio')">
+                            持仓分析
+                        </div>
+                    </div>
+                    
+                    <!-- 基金分析提示词 -->
+                    <div id="fund-prompt-content" class="prompt-content">
+                        <div class="setting-item" style="margin-bottom: 12px;">
+                            <label>系统提示词</label>
+                            <textarea id="panel-fund-system-prompt" class="prompt-textarea" placeholder="定义 AI 的角色和行为准则..."></textarea>
+                        </div>
+                        <div class="setting-item">
+                            <label>用户提示词</label>
+                            <textarea id="panel-fund-user-prompt" class="prompt-textarea" placeholder="具体的分析任务和数据模板..."></textarea>
+                        </div>
+                        <div class="variable-list">
+                            <div class="variable-list-title">📌 可用变量（点击插入）</div>
+                            <div class="variable-chips" id="fund-variables">
+                                <!-- 动态加载 -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 持仓分析提示词 -->
+                    <div id="portfolio-prompt-content" class="prompt-content" style="display: none;">
+                        <div class="setting-item" style="margin-bottom: 12px;">
+                            <label>系统提示词</label>
+                            <textarea id="panel-portfolio-system-prompt" class="prompt-textarea" placeholder="定义 AI 的角色和行为准则..."></textarea>
+                        </div>
+                        <div class="setting-item">
+                            <label>用户提示词</label>
+                            <textarea id="panel-portfolio-user-prompt" class="prompt-textarea" placeholder="具体的分析任务和数据模板..."></textarea>
+                        </div>
+                        <div class="variable-list">
+                            <div class="variable-list-title">📌 可用变量（点击插入）</div>
+                            <div class="variable-chips" id="portfolio-variables">
+                                <!-- 动态加载 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <p class="setting-hint" style="margin-top: 12px;">
+                    💡 提示词中的变量会在分析时自动替换为实际数据
+                </p>
+            </div>
+        </div>
+        <div class="settings-footer">
+            <div class="settings-footer-left">
+                <button class="btn btn-outline" onclick="resetPrompts()">重置提示词</button>
+            </div>
+            <div class="settings-footer-right">
+                <button class="btn btn-outline" onclick="closeSettingsPanel()">取消</button>
+                <button class="btn btn-primary" onclick="saveAllSettings()">保存所有设置</button>
             </div>
         </div>
     </div>
