@@ -19,6 +19,12 @@ export const useFundStore = defineStore('fund', () => {
   const recentTrades = ref([])
   const aiAnalysis = ref(null)
   const aiLoading = ref(false)
+  const aiSettings = ref({
+    api_key_configured: false,
+    deepseek_base_url: '',
+    deepseek_model: 'deepseek-chat',
+    total_position_amount: '0'
+  })
 
   // 计算属性
   const hasHoldingFunds = computed(() => 
@@ -212,11 +218,13 @@ export const useFundStore = defineStore('fund', () => {
   }
 
   // 获取 AI 建议
-  async function getAISuggestion(code) {
+  async function getAISuggestion(code, forceRefresh = false) {
     aiLoading.value = true
-    aiAnalysis.value = null
+    if (forceRefresh) {
+      aiAnalysis.value = null
+    }
     try {
-      const result = await aiAPI.suggest(code)
+      const result = await aiAPI.suggest(code, forceRefresh)
       if (result.error) {
         throw new Error(result.error)
       }
@@ -227,6 +235,25 @@ export const useFundStore = defineStore('fund', () => {
       throw error
     } finally {
       aiLoading.value = false
+    }
+  }
+
+  // 清空 AI 分析结果
+  function clearAIAnalysis() {
+    aiAnalysis.value = null
+  }
+
+  // 加载 AI 缓存（只在有缓存时加载，不自动分析）
+  async function loadAICache(code) {
+    try {
+      // 使用 cacheOnly=true，只在有缓存时返回，不会自动分析
+      const result = await aiAPI.suggest(code, false, true)
+      if (result && !result.error && !result.no_cache) {
+        aiAnalysis.value = result
+      }
+    } catch (error) {
+      // 静默失败，不影响页面加载
+      console.log('AI缓存加载失败:', error)
     }
   }
 
@@ -245,6 +272,17 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
+  // 加载 AI 设置
+  async function loadAISettings() {
+    try {
+      const settings = await aiAPI.getSettings()
+      aiSettings.value = settings
+      return settings
+    } catch (error) {
+      console.error('加载 AI 设置失败:', error)
+    }
+  }
+
   return {
     // 状态
     funds,
@@ -256,6 +294,7 @@ export const useFundStore = defineStore('fund', () => {
     recentTrades,
     aiAnalysis,
     aiLoading,
+    aiSettings,
     // 计算属性
     hasHoldingFunds,
     // 方法
@@ -274,6 +313,9 @@ export const useFundStore = defineStore('fund', () => {
     updateTrade,
     deleteTrade,
     getAISuggestion,
-    refreshAll
+    clearAIAnalysis,
+    loadAICache,
+    refreshAll,
+    loadAISettings
   }
 })

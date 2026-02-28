@@ -139,11 +139,27 @@ def init_db() -> None:
             )
         """)
         
+        # AI 分析缓存表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ai_analysis (
+                id SERIAL PRIMARY KEY,
+                fund_code VARCHAR(6) NOT NULL,
+                analysis_type VARCHAR(20) NOT NULL DEFAULT 'fund',
+                analysis TEXT NOT NULL,
+                indicators JSONB,
+                risk_metrics JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
+                UNIQUE(fund_code, analysis_type)
+            )
+        """)
+        
         # 创建索引
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_prices_fund_code ON prices(fund_code)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_prices_date ON prices(date)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_fund_code ON trades(fund_code)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(trade_date)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_analysis_fund_code ON ai_analysis(fund_code)")
         
         # 初始化默认设置
         default_settings = [

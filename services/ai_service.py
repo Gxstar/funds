@@ -1,6 +1,6 @@
 """AI 分析服务"""
 import asyncio
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import Optional, List
 import logging
@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 from utils.helpers import get_setting, get_total_position_amount
+from database.connection import get_db_context
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,96 @@ def get_portfolio_analysis_prompts() -> tuple:
         portfolio_prompts.get("system_prompt", "你是专业的基金投资顾问，擅长投资组合分析和资产配置。"),
         portfolio_prompts.get("user_prompt", "")
     )
+
+
+class AICache:
+    """AI 分析缓存管理"""
+    
+    @staticmethod
+    def get_cache(fund_code: str, analysis_type: str = "fund") -> Optional[dict]:
+        """获取缓存的分析结果"""
+        try:
+            with get_db_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, analysis, indicators, risk_metrics, created_at, expires_at
+                    FROM ai_analysis 
+                    WHERE fund_code = %s AND analysis_type = %s
+                """, (fund_code, analysis_type))
+                row = cursor.fetchone()
+                
+                if not row:
+                    return None
+                
+                # 检查是否过期
+                expires_at = row.get("expires_at")
+                if expires_at and datetime.now() > expires_at:
+                    logger.info(f"缓存已过期: {fund_code}")
+                    return None
+                
+                return {
+                    "id": row.get("id"),
+                    "analysis": row.get("analysis"),
+                    "indicators": row.get("indicators"),
+                    "risk_metrics": row.get("risk_metrics"),
+                    "timestamp": row.get("created_at").isoformat() if row.get("created_at") else None,
+                    "cached": True
+                }
+        except Exception as e:
+            logger.error(f"获取AI缓存失败: {e}")
+            return None
+    
+    @staticmethod
+    def save_cache(fund_code: str, analysis: str, analysis_type: str = "fund", 
+                   indicators: dict = None, risk_metrics: dict = None,
+                   expire_hours: int = 24) -> None:
+        """保存分析结果到缓存"""
+        try:
+            # 计算过期时间：下一个交易日的15:00或24小时后
+            now = datetime.now()
+            # 如果当前时间在15:00之前，当天15:00过期；否则次日15:00过期
+            if now.hour < 15:
+                expires_at = now.replace(hour=15, minute=0, second=0, microsecond=0)
+            else:
+                expires_at = (now + timedelta(days=1)).replace(hour=15, minute=0, second=0, microsecond=0)
+            
+            with get_db_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO ai_analysis (fund_code, analysis_type, analysis, indicators, risk_metrics, created_at, expires_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (fund_code, analysis_type) 
+                    DO UPDATE SET 
+                        analysis = EXCLUDED.analysis,
+                        indicators = EXCLUDED.indicators,
+                        risk_metrics = EXCLUDED.risk_metrics,
+                        created_at = EXCLUDED.created_at,
+                        expires_at = EXCLUDED.expires_at
+                """, (fund_code, analysis_type, analysis, 
+                      json.dumps(indicators) if indicators else None,
+                      json.dumps(risk_metrics) if risk_metrics else None,
+                      now, expires_at))
+                logger.info(f"已保存AI缓存: {fund_code}, 过期时间: {expires_at}")
+        except Exception as e:
+            logger.error(f"保存AI缓存失败: {e}")
+    
+    @staticmethod
+    def clear_cache(fund_code: str, analysis_type: str = "fund") -> None:
+        """清除缓存"""
+        try:
+            with get_db_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    DELETE FROM ai_analysis WHERE fund_code = %s AND analysis_type = %s
+                """, (fund_code, analysis_type))
+        except Exception as e:
+            logger.error(f"清除AI缓存失败: {e}")
+    
+    @staticmethod
+    def is_cache_valid(fund_code: str, analysis_type: str = "fund") -> bool:
+        """检查缓存是否有效"""
+        cache = AICache.get_cache(fund_code, analysis_type)
+        return cache is not None
 
 
 class DeepSeekClient:
@@ -109,8 +200,37 @@ class AIService:
         return bool(get_setting("deepseek_api_key"))
     
     @staticmethod
-    async def analyze_fund(fund_code: str) -> dict:
-        """分析单只基金"""
+    async def analyze_fund(fund_code: str, force_refresh: bool = False, cache_only: bool = False) -> dict:
+        """分析单只基金
+        
+        Args:
+            fund_code: 基金代码
+            force_refresh: 是否强制刷新缓存
+            cache_only: 只获取缓存，没有缓存时返回空
+        """
+        # 检查缓存
+        if not force_refresh:
+            cache = AICache.get_cache(fund_code, "fund")
+            if cache:
+                logger.info(f"使用缓存的AI分析: {fund_code}")
+                return {
+                    "fund_code": fund_code,
+                    "analysis": cache["analysis"],
+                    "indicators": cache.get("indicators", {}),
+                    "risk_metrics": cache.get("risk_metrics"),
+                    "timestamp": cache["timestamp"],
+                    "cached": True
+                }
+        
+        # 如果只获取缓存且没有缓存，返回空
+        if cache_only:
+            return {
+                "fund_code": fund_code,
+                "analysis": None,
+                "cached": False,
+                "no_cache": True
+            }
+        
         client = AIService.get_client()
         if not client:
             return {
@@ -319,20 +439,33 @@ class AIService:
                 {"role": "user", "content": prompt}
             ], model=model)
             
+            # 构建结果
+            indicators_data = {
+                "ma5": get_latest(indicators.get("ma5", [])),
+                "ma10": get_latest(indicators.get("ma10", [])),
+                "ma20": get_latest(indicators.get("ma20", [])),
+                "rsi": get_latest(indicators.get("rsi", [])),
+                "macd": get_latest(indicators.get("macd", {}).get("macd", [])),
+            }
+            
+            # 保存到缓存
+            AICache.save_cache(
+                fund_code=fund_code,
+                analysis=analysis,
+                analysis_type="fund",
+                indicators=indicators_data,
+                risk_metrics=risk_metrics
+            )
+            
             return {
                 "fund_code": fund_code,
                 "analysis": analysis,
-                "indicators": {
-                    "ma5": get_latest(indicators.get("ma5", [])),
-                    "ma10": get_latest(indicators.get("ma10", [])),
-                    "ma20": get_latest(indicators.get("ma20", [])),
-                    "rsi": get_latest(indicators.get("rsi", [])),
-                    "macd": get_latest(indicators.get("macd", {}).get("macd", [])),
-                },
+                "indicators": indicators_data,
                 "risk_metrics": risk_metrics,
                 "change_5d": round(change_5d, 2),
                 "change_20d": round(change_20d, 2),
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "cached": False
             }
         except httpx.HTTPStatusError as e:
             error_msg = f"API 请求失败: {e.response.status_code}"

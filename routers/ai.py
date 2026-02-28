@@ -36,12 +36,45 @@ async def get_ai_status():
 
 
 @router.post("/suggest/{fund_code}")
-async def suggest_fund(fund_code: str):
-    """获取单只基金建议"""
-    result = await AIService.analyze_fund(fund_code)
+async def suggest_fund(fund_code: str, force_refresh: bool = False, cache_only: bool = False):
+    """获取单只基金建议
+    
+    Args:
+        fund_code: 基金代码
+        force_refresh: 是否强制刷新缓存
+        cache_only: 只获取缓存，没有缓存时返回空
+    """
+    result = await AIService.analyze_fund(fund_code, force_refresh=force_refresh, cache_only=cache_only)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+@router.get("/suggest/{fund_code}/cache")
+async def get_fund_analysis_cache(fund_code: str):
+    """获取基金分析的缓存状态"""
+    from services.ai_service import AICache
+    
+    cache = AICache.get_cache(fund_code, "fund")
+    if cache:
+        return {
+            "cached": True,
+            "timestamp": cache.get("timestamp"),
+            "has_cache": True
+        }
+    return {
+        "cached": False,
+        "has_cache": False
+    }
+
+
+@router.delete("/suggest/{fund_code}/cache")
+async def clear_fund_analysis_cache(fund_code: str):
+    """清除基金分析的缓存"""
+    from services.ai_service import AICache
+    
+    AICache.clear_cache(fund_code, "fund")
+    return {"message": "缓存已清除"}
 
 
 @router.post("/analyze")

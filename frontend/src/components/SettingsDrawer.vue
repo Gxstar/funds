@@ -22,11 +22,12 @@ const generalSettings = ref({
 const aiSettings = ref({
   api_key: '',
   base_url: '',
-  model: 'deepseek-chat'
+  model: 'deepseek-chat',
+  api_key_configured: false
 })
 
 const dbConfig = ref({
-  type: 'postgresql',
+  type: 'sqlite',
   sqlite_path: './data/funds.db',
   pg_host: 'localhost',
   pg_port: '5432',
@@ -75,22 +76,38 @@ const portfolioVariables = [
 // 加载设置
 async function loadSettings() {
   try {
-    const [settings, db, prompts] = await Promise.all([
-      settingsAPI.getSettings(),
+    const [settings, dbResult, promptsResult] = await Promise.all([
+      aiAPI.getSettings(),
       settingsAPI.getDatabaseConfig(),
       settingsAPI.getPrompts()
     ])
     
+    // 加载通用设置
     generalSettings.value.total_position_amount = settings.total_position_amount || ''
+    
+    // 加载 AI 设置
     aiSettings.value = {
       api_key: '',
       base_url: settings.deepseek_base_url || 'https://api.deepseek.com/v1',
-      model: settings.deepseek_model || 'deepseek-chat'
+      model: settings.deepseek_model || 'deepseek-chat',
+      api_key_configured: settings.api_key_configured || false
     }
-    dbStatus.value = db
     
-    if (prompts) {
-      promptConfig.value = prompts
+    // 加载数据库配置到表单
+    if (dbResult) {
+      dbConfig.value.type = dbResult.type || 'sqlite'
+      dbConfig.value.sqlite_path = dbResult.sqlite?.path || './data/funds.db'
+      dbConfig.value.pg_host = dbResult.postgresql?.host || 'localhost'
+      dbConfig.value.pg_port = dbResult.postgresql?.port || '5432'
+      dbConfig.value.pg_name = dbResult.postgresql?.name || 'funds'
+      dbConfig.value.pg_user = dbResult.postgresql?.user || ''
+      dbConfig.value.pg_password = ''
+      dbStatus.value = dbResult
+    }
+    
+    // 正确处理提示词数据结构
+    if (promptsResult && promptsResult.prompts) {
+      promptConfig.value = promptsResult.prompts
     }
   } catch (error) {
     console.error('加载设置失败:', error)
@@ -101,7 +118,7 @@ async function loadSettings() {
 async function saveAllSettings() {
   try {
     // 保存通用设置
-    await settingsAPI.updatePositionSetting({ total_position_amount: generalSettings.value.total_position_amount })
+    await aiAPI.updatePositionSetting({ total_position_amount: generalSettings.value.total_position_amount })
     
     // 保存 AI 设置
     const aiData = {}
@@ -109,11 +126,17 @@ async function saveAllSettings() {
     if (aiSettings.value.base_url) aiData.deepseek_base_url = aiSettings.value.base_url
     if (aiSettings.value.model) aiData.deepseek_model = aiSettings.value.model
     if (Object.keys(aiData).length > 0) {
-      await settingsAPI.updateSettings(aiData)
+      await aiAPI.updateSettings(aiData)
     }
     
-    // 保存提示词
-    await settingsAPI.updatePrompts(promptConfig.value)
+    // 保存提示词 - 转换为后端期望的格式
+    const promptsData = {
+      fund_analysis_system: promptConfig.value.fund_analysis?.system_prompt || null,
+      fund_analysis_user: promptConfig.value.fund_analysis?.user_prompt || null,
+      portfolio_analysis_system: promptConfig.value.portfolio_analysis?.system_prompt || null,
+      portfolio_analysis_user: promptConfig.value.portfolio_analysis?.user_prompt || null
+    }
+    await settingsAPI.updatePrompts(promptsData)
     
     ElMessage.success('设置已保存')
     visible.value = false
@@ -140,8 +163,20 @@ function insertVariable(variable, textareaId) {
 // 重置提示词
 async function resetPrompts() {
   try {
-    await settingsAPI.resetPrompts()
-    await loadSettings()
+    const result = await settingsAPI.resetPrompts()
+    // 正确处理返回的提示词数据
+    if (result && result.prompts) {
+      promptConfig.value = {
+        fund_analysis: {
+          system_prompt: result.prompts.fund_analysis?.system_prompt || '',
+          user_prompt: result.prompts.fund_analysis?.user_prompt || ''
+        },
+        portfolio_analysis: {
+          system_prompt: result.prompts.portfolio_analysis?.system_prompt || '',
+          user_prompt: result.prompts.portfolio_analysis?.user_prompt || ''
+        }
+      }
+    }
     ElMessage.success('提示词已重置')
   } catch (error) {
     ElMessage.error(error.message || '重置失败')
@@ -181,7 +216,13 @@ watch(visible, (val) => {
       <el-tab-pane label="🤖 AI 设置">
         <el-form label-width="100px">
           <el-form-item label="API Key">
-            <el-input v-model="aiSettings.api_key" type="password" show-password placeholder="sk-..." />
+            <div class="api-key-wrapper">
+              <el-input v-model="aiSettings.api_key" type="password" show-password placeholder="sk-..." style="flex: 1" />
+              <el-tag v-if="aiSettings.api_key_configured && !aiSettings.api_key" type="success" size="small">已配置</el-tag>
+            </div>
+            <div v-if="aiSettings.api_key_configured && !aiSettings.api_key" class="form-hint-inline">
+              如需修改请输入新的 API Key，否则保持为空
+            </div>
           </el-form-item>
           <el-form-item label="API 地址">
             <el-input v-model="aiSettings.base_url" placeholder="https://api.deepseek.com/v1" />
@@ -198,7 +239,9 @@ watch(visible, (val) => {
 
       <!-- 数据库设置 -->
       <el-tab-pane label="💾 数据库设置">
-        <el-alert v-if="dbStatus" :title="`当前使用: ${dbStatus.current_type}`" type="info" :closable="false" show-icon style="margin-bottom: 16px" />
+        <el-alert v-if="dbStatus" type="info" :closable="false" show-icon style="margin-bottom: 16px">
+          <template #title>当前使用: {{ dbStatus.type === 'sqlite' ? 'SQLite' : 'PostgreSQL' }}</template>
+        </el-alert>
         <el-form label-width="100px">
           <el-form-item label="数据库类型">
             <el-radio-group v-model="dbConfig.type">
@@ -225,7 +268,7 @@ watch(visible, (val) => {
               <el-input v-model="dbConfig.pg_user" placeholder="postgres" />
             </el-form-item>
             <el-form-item label="密码">
-              <el-input v-model="dbConfig.pg_password" type="password" show-password />
+              <el-input v-model="dbConfig.pg_password" type="password" show-password placeholder="输入新密码以修改" />
             </el-form-item>
           </template>
         </el-form>
@@ -333,6 +376,19 @@ watch(visible, (val) => {
   font-size: 12px;
   color: #909399;
   margin-top: 8px;
+}
+
+.form-hint-inline {
+  font-size: 12px;
+  color: #67c23a;
+  margin-top: 4px;
+}
+
+.api-key-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
 }
 
 .prompt-section {

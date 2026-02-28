@@ -79,7 +79,15 @@ export const marketAPI = {
 // AI 相关 API
 export const aiAPI = {
   getStatus: () => request(`${API_BASE}/ai/status`),
-  suggest: (code) => request(`${API_BASE}/ai/suggest/${code}`, { method: 'POST' }),
+  suggest: (code, forceRefresh = false, cacheOnly = false) => {
+    const params = []
+    if (forceRefresh) params.push('force_refresh=true')
+    if (cacheOnly) params.push('cache_only=true')
+    const queryString = params.length > 0 ? `?${params.join('&')}` : ''
+    return request(`${API_BASE}/ai/suggest/${code}${queryString}`, { method: 'POST' })
+  },
+  getCacheStatus: (code) => request(`${API_BASE}/ai/suggest/${code}/cache`),
+  clearCache: (code) => request(`${API_BASE}/ai/suggest/${code}/cache`, { method: 'DELETE' }),
   analyze: () => request(`${API_BASE}/ai/analyze`, { method: 'POST' }),
   getSettings: () => request(`${API_BASE}/ai/settings`),
   updateSettings: (data) => request(`${API_BASE}/ai/settings`, { method: 'POST', body: data }),
