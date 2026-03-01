@@ -276,7 +276,7 @@ async function deleteFund() {
   } catch (e) {}
 }
 
-// AI 分析
+// AI 分析 - 获取建议（forceRefresh=true 时重新分析并更新数据库）
 async function getAIAnalysis(forceRefresh = false) {
   try {
     await fundStore.getAISuggestion(route.params.code, forceRefresh)
@@ -513,16 +513,16 @@ onUnmounted(() => {
             :loading="fundStore.aiLoading" 
             @click="getAIAnalysis(true)"
           >
-            刷新
+            刷新分析
           </el-button>
           <el-button 
             v-else 
             type="primary" 
             size="small" 
             :loading="fundStore.aiLoading" 
-            @click="getAIAnalysis(false)"
+            @click="getAIAnalysis(true)"
           >
-            分析
+            开始分析
           </el-button>
         </el-space>
       </div>
@@ -536,7 +536,6 @@ onUnmounted(() => {
       <el-scrollbar v-if="fundStore.aiAnalysis" height="500px" class="ai-result">
         <div v-if="fundStore.aiAnalysis.timestamp" class="ai-time">
           分析时间: {{ new Date(fundStore.aiAnalysis.timestamp).toLocaleString('zh-CN') }}
-          <span v-if="fundStore.aiAnalysis.cached" class="cache-hint">（使用缓存，点击刷新获取最新分析）</span>
         </div>
         <div class="markdown-body" v-html="renderMarkdown(fundStore.aiAnalysis.analysis)"></div>
       </el-scrollbar>

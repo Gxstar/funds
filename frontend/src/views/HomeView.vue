@@ -208,11 +208,11 @@ function formatAnalysisTime(dateStr) {
   return `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')} ${hour}:${minute}`
 }
 
-// AI 持仓分析 - 加载缓存
+// AI 持仓分析 - 加载缓存（优先展示缓存，没有缓存不弹窗）
 async function loadPortfolioAnalysis() {
   portfolioLoading.value = true
   try {
-    // 先尝试获取缓存
+    // cacheOnly=true：只获取缓存，没有缓存时返回 no_cache
     const result = await aiAPI.analyze(false, true)
     if (result.no_cache) {
       // 没有缓存，不显示弹窗
@@ -227,10 +227,11 @@ async function loadPortfolioAnalysis() {
   }
 }
 
-// AI 持仓分析 - 刷新分析
+// AI 持仓分析 - 刷新分析（强制重新分析并更新数据库）
 async function refreshPortfolioAnalysis() {
   portfolioLoading.value = true
   try {
+    // forceRefresh=true：强制重新分析，结果会保存到数据库替换旧数据
     const result = await aiAPI.analyze(true, false)
     if (result.error) throw new Error(result.error)
     portfolioAnalysis.value = result

@@ -149,7 +149,6 @@ def init_db() -> None:
                 indicators JSONB,
                 risk_metrics JSONB,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP,
                 UNIQUE(fund_code, analysis_type)
             )
         """)

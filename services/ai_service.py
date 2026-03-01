@@ -57,19 +57,13 @@ class AICache:
             with get_db_context() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id, analysis, indicators, risk_metrics, created_at, expires_at
+                    SELECT id, analysis, indicators, risk_metrics, created_at
                     FROM ai_analysis 
                     WHERE fund_code = %s AND analysis_type = %s
                 """, (fund_code, analysis_type))
                 row = cursor.fetchone()
                 
                 if not row:
-                    return None
-                
-                # 检查是否过期
-                expires_at = row.get("expires_at")
-                if expires_at and datetime.now() > expires_at:
-                    logger.info(f"缓存已过期: {fund_code}")
                     return None
                 
                 return {
@@ -86,35 +80,27 @@ class AICache:
     
     @staticmethod
     def save_cache(fund_code: str, analysis: str, analysis_type: str = "fund", 
-                   indicators: dict = None, risk_metrics: dict = None,
-                   expire_hours: int = 24) -> None:
-        """保存分析结果到缓存"""
+                   indicators: dict = None, risk_metrics: dict = None) -> None:
+        """保存分析结果到缓存（始终只保存最新的一条）"""
         try:
-            # 计算过期时间：下一个交易日的15:00或24小时后
             now = datetime.now()
-            # 如果当前时间在15:00之前，当天15:00过期；否则次日15:00过期
-            if now.hour < 15:
-                expires_at = now.replace(hour=15, minute=0, second=0, microsecond=0)
-            else:
-                expires_at = (now + timedelta(days=1)).replace(hour=15, minute=0, second=0, microsecond=0)
             
             with get_db_context() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO ai_analysis (fund_code, analysis_type, analysis, indicators, risk_metrics, created_at, expires_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO ai_analysis (fund_code, analysis_type, analysis, indicators, risk_metrics, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (fund_code, analysis_type) 
                     DO UPDATE SET 
                         analysis = EXCLUDED.analysis,
                         indicators = EXCLUDED.indicators,
                         risk_metrics = EXCLUDED.risk_metrics,
-                        created_at = EXCLUDED.created_at,
-                        expires_at = EXCLUDED.expires_at
+                        created_at = EXCLUDED.created_at
                 """, (fund_code, analysis_type, analysis, 
                       json.dumps(indicators) if indicators else None,
                       json.dumps(risk_metrics) if risk_metrics else None,
-                      now, expires_at))
-                logger.info(f"已保存AI缓存: {fund_code}, 过期时间: {expires_at}")
+                      now))
+                logger.info(f"已保存AI缓存: {fund_code}")
         except Exception as e:
             logger.error(f"保存AI缓存失败: {e}")
     
@@ -132,7 +118,7 @@ class AICache:
     
     @staticmethod
     def is_cache_valid(fund_code: str, analysis_type: str = "fund") -> bool:
-        """检查缓存是否有效"""
+        """检查缓存是否存在"""
         cache = AICache.get_cache(fund_code, analysis_type)
         return cache is not None
 
@@ -205,10 +191,10 @@ class AIService:
         
         Args:
             fund_code: 基金代码
-            force_refresh: 是否强制刷新缓存
+            force_refresh: 是否强制刷新缓存（重新分析）
             cache_only: 只获取缓存，没有缓存时返回空
         """
-        # 检查缓存
+        # 如果不是强制刷新，先尝试获取缓存
         if not force_refresh:
             cache = AICache.get_cache(fund_code, "fund")
             if cache:
@@ -497,13 +483,13 @@ class AIService:
         """分析持仓组合（整体分析）
         
         Args:
-            force_refresh: 是否强制刷新缓存
+            force_refresh: 是否强制刷新缓存（重新分析）
             cache_only: 只获取缓存，没有缓存时返回空
         """
         from services.fund_service import FundService
         from services.market_service import MarketService
         
-        # 检查缓存
+        # 如果不是强制刷新，先尝试获取缓存
         if not force_refresh:
             cache = AICache.get_cache("portfolio", "portfolio")
             if cache:

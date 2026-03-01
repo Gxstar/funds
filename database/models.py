@@ -167,7 +167,6 @@ class AIAnalysis:
     indicators: Optional[dict] = None
     risk_metrics: Optional[dict] = None
     created_at: Optional[datetime] = None
-    expires_at: Optional[datetime] = None
     
     @classmethod
     def from_row(cls, row: dict) -> "AIAnalysis":
@@ -179,5 +178,4 @@ class AIAnalysis:
             indicators=row.get("indicators"),
             risk_metrics=row.get("risk_metrics"),
             created_at=row.get("created_at"),
-            expires_at=row.get("expires_at"),
         )

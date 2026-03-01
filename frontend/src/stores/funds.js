@@ -227,14 +227,16 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
-  // 获取 AI 建议
+  // 获取 AI 建议（强制刷新时重新分析，否则返回缓存）
   async function getAISuggestion(code, forceRefresh = false) {
     aiLoading.value = true
     if (forceRefresh) {
       aiAnalysis.value = null
     }
     try {
-      const result = await aiAPI.suggest(code, forceRefresh)
+      // forceRefresh=false 时优先返回缓存，没有缓存返回 no_cache
+      // forceRefresh=true 时强制重新分析并更新数据库
+      const result = await aiAPI.suggest(code, forceRefresh, false)
       if (result.error) {
         throw new Error(result.error)
       }
@@ -256,10 +258,12 @@ export const useFundStore = defineStore('fund', () => {
   // 加载 AI 缓存（只在有缓存时加载，不自动分析）
   async function loadAICache(code) {
     try {
-      // 使用 cacheOnly=true，只在有缓存时返回，不会自动分析
+      // cacheOnly=true：只获取缓存，没有缓存时返回 no_cache，不会触发新分析
       const result = await aiAPI.suggest(code, false, true)
       if (result && !result.error && !result.no_cache) {
         aiAnalysis.value = result
+      } else {
+        aiAnalysis.value = null
       }
     } catch (error) {
       // 静默失败，不影响页面加载
