@@ -687,6 +687,7 @@ onUnmounted(() => {
 .fund-detail {
   display: flex;
   flex-direction: column;
+  min-width: 1200px;
   gap: 16px;
 }
 
