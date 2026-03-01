@@ -493,10 +493,35 @@ class AIService:
             }
     
     @staticmethod
-    async def analyze_portfolio() -> dict:
-        """分析持仓组合（整体分析）"""
+    async def analyze_portfolio(force_refresh: bool = False, cache_only: bool = False) -> dict:
+        """分析持仓组合（整体分析）
+        
+        Args:
+            force_refresh: 是否强制刷新缓存
+            cache_only: 只获取缓存，没有缓存时返回空
+        """
         from services.fund_service import FundService
         from services.market_service import MarketService
+        
+        # 检查缓存
+        if not force_refresh:
+            cache = AICache.get_cache("portfolio", "portfolio")
+            if cache:
+                logger.info("使用缓存的持仓分析")
+                return {
+                    "analysis": cache["analysis"],
+                    "summary": cache.get("indicators", {}),
+                    "timestamp": cache["timestamp"],
+                    "cached": True
+                }
+        
+        # 如果只获取缓存且没有缓存，返回空
+        if cache_only:
+            return {
+                "analysis": None,
+                "cached": False,
+                "no_cache": True
+            }
         
         client = AIService.get_client()
         if not client:
@@ -575,13 +600,57 @@ class AIService:
         
         holdings_detail = "\n\n".join(holdings_detail_list)
         
+        # 获取市场指数数据
+        from services.index_service import IndexService
+        market_indices_data = await IndexService.get_indices(use_cache=True)
+        market_indices = "暂无数据"
+        if market_indices_data.get("data"):
+            indices_list = []
+            for idx in market_indices_data["data"]:
+                change_str = f"+{idx['change_pct']:.2f}%" if idx['change_pct'] > 0 else f"{idx['change_pct']:.2f}%"
+                indices_list.append(f"- {idx['name']}: {idx['price']:.2f} ({change_str})")
+            market_indices = "\n".join(indices_list)
+            if market_indices_data.get("date"):
+                market_indices += f"\n\n数据日期: {market_indices_data['date']}"
+        
+        # 获取市场情绪数据
+        from services.market_sentiment_service import MarketSentimentService
+        try:
+            sentiment_data = await MarketSentimentService.get_market_sentiment()
+            market_sentiment = f"""- 涨跌家数: {sentiment_data.get('up_count', 0)} 涨 / {sentiment_data.get('down_count', 0)} 跌
+- 涨跌比: {sentiment_data.get('up_down_ratio', 'N/A')}
+- 北向资金: {sentiment_data.get('north_flow', 'N/A')}
+- 市场强度: {sentiment_data.get('market_strength', 'N/A')}"""
+        except Exception as e:
+            logger.warning(f"获取市场情绪失败: {e}")
+            market_sentiment = "暂无数据"
+        
+        # 获取相关新闻（综合各板块新闻）
+        from services.news_service import NewsService
+        try:
+            # 获取综合财经新闻
+            all_news = await NewsService.get_fund_related_news(max_news=10)
+            if all_news:
+                news_list = []
+                for news in all_news[:10]:
+                    news_list.append(f"- [{news.get('source', '财经')}] {news.get('title', '')}")
+                related_news = "\n".join(news_list)
+            else:
+                related_news = "暂无相关新闻"
+        except Exception as e:
+            logger.warning(f"获取新闻失败: {e}")
+            related_news = "暂无相关新闻"
+        
         # 从配置文件加载提示词
         system_prompt, user_prompt_template = get_portfolio_analysis_prompts()
         
         # 构建提示词
         prompt = user_prompt_template.format(
+            market_indices=market_indices,
+            market_sentiment=market_sentiment,
             account_summary=account_summary,
-            holdings_detail=holdings_detail
+            holdings_detail=holdings_detail,
+            related_news=related_news
         )
         
         try:
@@ -591,17 +660,29 @@ class AIService:
                 {"role": "user", "content": prompt}
             ], model=model)
             
+            # 保存摘要数据用于缓存
+            summary = {
+                "fund_count": holdings_summary['fund_count'],
+                "total_cost": float(holdings_summary['total_cost']),
+                "total_market_value": float(holdings_summary['total_market_value']),
+                "total_profit": float(holdings_summary['total_profit']),
+                "profit_rate": float(holdings_summary['profit_rate']),
+                "position_ratio": position_ratio
+            }
+            
+            # 保存到缓存
+            AICache.save_cache(
+                fund_code="portfolio",
+                analysis=analysis,
+                analysis_type="portfolio",
+                indicators=summary
+            )
+            
             return {
                 "analysis": analysis,
-                "summary": {
-                    "fund_count": holdings_summary['fund_count'],
-                    "total_cost": float(holdings_summary['total_cost']),
-                    "total_market_value": float(holdings_summary['total_market_value']),
-                    "total_profit": float(holdings_summary['total_profit']),
-                    "profit_rate": float(holdings_summary['profit_rate']),
-                    "position_ratio": position_ratio
-                },
-                "timestamp": datetime.now().isoformat()
+                "summary": summary,
+                "timestamp": datetime.now().isoformat(),
+                "cached": False
             }
         except httpx.HTTPStatusError as e:
             error_msg = f"API 请求失败: {e.response.status_code}"

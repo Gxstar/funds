@@ -74,6 +74,7 @@ export const marketAPI = {
   getChart: (code, period = '1m') => request(`${API_BASE}/market/${code}/chart?period=${period}`),
   sync: (code, force = false) => request(`${API_BASE}/market/${code}/sync?force=${force}`, { method: 'POST' }),
   syncAll: () => request(`${API_BASE}/market/sync-all`, { method: 'POST' }),
+  getIndices: () => request(`${API_BASE}/market/indices`),
 }
 
 // AI 相关 API
@@ -88,7 +89,15 @@ export const aiAPI = {
   },
   getCacheStatus: (code) => request(`${API_BASE}/ai/suggest/${code}/cache`),
   clearCache: (code) => request(`${API_BASE}/ai/suggest/${code}/cache`, { method: 'DELETE' }),
-  analyze: () => request(`${API_BASE}/ai/analyze`, { method: 'POST' }),
+  analyze: (forceRefresh = false, cacheOnly = false) => {
+    const params = []
+    if (forceRefresh) params.push('force_refresh=true')
+    if (cacheOnly) params.push('cache_only=true')
+    const queryString = params.length > 0 ? `?${params.join('&')}` : ''
+    return request(`${API_BASE}/ai/analyze${queryString}`, { method: 'POST' })
+  },
+  getAnalyzeCache: () => request(`${API_BASE}/ai/analyze/cache`),
+  clearAnalyzeCache: () => request(`${API_BASE}/ai/analyze/cache`, { method: 'DELETE' }),
   getSettings: () => request(`${API_BASE}/ai/settings`),
   updateSettings: (data) => request(`${API_BASE}/ai/settings`, { method: 'POST', body: data }),
   getPositionSetting: () => request(`${API_BASE}/ai/position-setting`),

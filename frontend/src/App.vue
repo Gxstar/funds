@@ -223,9 +223,11 @@ html, body, #app {
 
 /* 主内容区 */
 .app-main {
+  display: flex;
   background: #f0f2f5;
   padding: 20px;
   overflow-y: auto;
+  justify-content: center; /* 水平居中 */
 }
 
 /* 底部状态栏 */

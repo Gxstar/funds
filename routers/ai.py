@@ -78,12 +78,44 @@ async def clear_fund_analysis_cache(fund_code: str):
 
 
 @router.post("/analyze")
-async def analyze_portfolio():
-    """分析持仓组合"""
-    result = await AIService.analyze_portfolio()
+async def analyze_portfolio(force_refresh: bool = False, cache_only: bool = False):
+    """分析持仓组合
+    
+    Args:
+        force_refresh: 是否强制刷新缓存
+        cache_only: 只获取缓存，没有缓存时返回空
+    """
+    result = await AIService.analyze_portfolio(force_refresh=force_refresh, cache_only=cache_only)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+@router.get("/analyze/cache")
+async def get_portfolio_analysis_cache():
+    """获取持仓分析的缓存状态"""
+    from services.ai_service import AICache
+    
+    cache = AICache.get_cache("portfolio", "portfolio")
+    if cache:
+        return {
+            "cached": True,
+            "timestamp": cache.get("timestamp"),
+            "has_cache": True
+        }
+    return {
+        "cached": False,
+        "has_cache": False
+    }
+
+
+@router.delete("/analyze/cache")
+async def clear_portfolio_analysis_cache():
+    """清除持仓分析的缓存"""
+    from services.ai_service import AICache
+    
+    AICache.clear_cache("portfolio", "portfolio")
+    return {"message": "缓存已清除"}
 
 
 @router.get("/settings")

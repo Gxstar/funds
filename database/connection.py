@@ -143,7 +143,7 @@ def init_db() -> None:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS ai_analysis (
                 id SERIAL PRIMARY KEY,
-                fund_code VARCHAR(6) NOT NULL,
+                fund_code VARCHAR(20) NOT NULL,
                 analysis_type VARCHAR(20) NOT NULL DEFAULT 'fund',
                 analysis TEXT NOT NULL,
                 indicators JSONB,

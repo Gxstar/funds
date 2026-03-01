@@ -3,8 +3,25 @@ from fastapi import APIRouter, Query
 from typing import Optional
 
 from services.market_service import MarketService
+from services.index_service import IndexService
 
 router = APIRouter(prefix="/api/market", tags=["行情数据"])
+
+
+@router.get("/indices")
+async def get_market_indices():
+    """获取大盘指数（使用缓存）"""
+    result = await IndexService.get_indices(use_cache=True)
+    return result
+
+
+@router.get("/sync-all")
+async def sync_all_funds():
+    """同步所有基金数据"""
+    from services.sync_scheduler import scheduler
+    
+    results = await scheduler.sync_all_funds()
+    return {"results": results}
 
 
 @router.get("/{fund_code}")
@@ -63,12 +80,3 @@ async def sync_fund(fund_code: str, force: bool = False):
     """手动同步基金数据"""
     result = await MarketService.sync_fund_history(fund_code, force)
     return result
-
-
-@router.post("/sync-all")
-async def sync_all_funds():
-    """同步所有基金数据"""
-    from services.sync_scheduler import scheduler
-    
-    results = await scheduler.sync_all_funds()
-    return {"results": results}

@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useFundStore } from '@/stores/funds'
-import { aiAPI } from '@/api'
+import { aiAPI, marketAPI } from '@/api'
 import * as echarts from 'echarts'
 import { marked } from 'marked'
 
@@ -20,6 +20,12 @@ const portfolioLoading = ref(false)
 const portfolioAnalysis = ref(null)
 const pieChart = ref(null)
 let chartInstance = null
+
+// 市场指数数据
+const indicesData = ref([])
+const indicesLoading = ref(false)
+const indicesDate = ref('')
+const indicesIsToday = ref(true)
 
 // 格式化
 function formatCurrency(value) {
@@ -45,11 +51,43 @@ const positionInfo = computed(() => {
   return null
 })
 
-// 持仓基金（按涨跌幅排序）
+// 持仓基金（按市值排序）
 const sortedHoldings = computed(() => {
-  return [...fundStore.hasHoldingFunds].sort((a, b) => 
-    (b.last_growth_rate || 0) - (a.last_growth_rate || 0)
-  )
+  return [...fundStore.hasHoldingFunds].sort((a, b) => {
+    const valueA = parseFloat(a.total_shares || 0) * parseFloat(a.last_net_value || 0)
+    const valueB = parseFloat(b.total_shares || 0) * parseFloat(b.last_net_value || 0)
+    return valueB - valueA
+  })
+})
+
+// 涨跌统计
+const changeStats = computed(() => {
+  const funds = fundStore.hasHoldingFunds
+  let up = 0, down = 0, flat = 0
+  let totalChange = 0
+  
+  funds.forEach(f => {
+    const rate = f.last_growth_rate
+    if (rate === null || rate === undefined) {
+      flat++
+    } else if (parseFloat(rate) > 0) {
+      up++
+      totalChange += parseFloat(rate)
+    } else if (parseFloat(rate) < 0) {
+      down++
+      totalChange += parseFloat(rate)
+    } else {
+      flat++
+    }
+  })
+  
+  return {
+    total: funds.length,
+    up,
+    down,
+    flat,
+    avgChange: funds.length > 0 ? (totalChange / funds.length).toFixed(2) : 0
+  }
 })
 
 // 分析弹窗显示控制
@@ -58,17 +96,32 @@ const showAnalysisDialog = computed({
   set: (val) => { if (!val) portfolioAnalysis.value = null }
 })
 
-// 初始化饼图
+// 图表类型切换
+const chartType = ref('pie') // 'pie' 或 'treemap'
+
+// 切换图表类型
+function toggleChartType() {
+  chartType.value = chartType.value === 'pie' ? 'treemap' : 'pie'
+  updateChart()
+}
+
+// 初始化图表
 function initPieChart() {
   if (!pieChart.value) return
   
   chartInstance = echarts.init(pieChart.value)
+  updateChart()
+}
+
+// 更新图表
+function updateChart() {
+  if (!chartInstance) return
   
   const holdings = fundStore.hasHoldingFunds
   if (holdings.length === 0) {
     chartInstance.setOption({
       title: { text: '暂无持仓', left: 'center', top: 'center', textStyle: { color: '#909399' } }
-    })
+    }, true)
     return
   }
   
@@ -77,33 +130,124 @@ function initPieChart() {
     value: Math.round(parseFloat(f.total_shares) * parseFloat(f.last_net_value || 0))
   }))
   
-  chartInstance.setOption({
-    tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
-    legend: { orient: 'vertical', right: 10, top: 'center', itemWidth: 10, itemHeight: 10 },
-    series: [{
-      type: 'pie',
-      radius: ['40%', '70%'],
-      center: ['35%', '50%'],
-      avoidLabelOverlap: false,
-      itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-      label: { show: false },
-      emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
-      data
-    }]
-  })
+  if (chartType.value === 'pie') {
+    chartInstance.setOption({
+      title: { show: false },
+      tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+      legend: { orient: 'vertical', right: 10, top: 'center', itemWidth: 10, itemHeight: 10 },
+      series: [{
+        type: 'pie',
+        radius: ['40%', '70%'],
+        center: ['35%', '50%'],
+        avoidLabelOverlap: false,
+        itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+        label: { show: false },
+        emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
+        data
+      }]
+    }, true)
+  } else {
+    // 矩形树图
+    chartInstance.setOption({
+      title: { show: false },
+      tooltip: { trigger: 'item', formatter: '{b}: ¥{c}' },
+      legend: { show: false },
+      series: [{
+        type: 'treemap',
+        roam: false,
+        nodeClick: false,
+        breadcrumb: { show: false },
+        label: { show: true, fontSize: 11, overflow: 'truncate', ellipsis: '...' },
+        upperLabel: { show: true, height: 20 },
+        itemStyle: { borderRadius: 4, gapWidth: 2, borderColor: '#fff', borderWidth: 2 },
+        emphasis: { focus: 'descendant' },
+        levels: [
+          {
+            itemStyle: { borderWidth: 2, gapWidth: 2 }
+          }
+        ],
+        data
+      }]
+    }, true)
+  }
 }
 
-// AI 持仓分析
-async function analyzePortfolio() {
+// 加载市场指数
+async function loadIndices() {
+  indicesLoading.value = true
+  try {
+    const result = await marketAPI.getIndices()
+    indicesData.value = result.data || []
+    indicesDate.value = result.date || ''
+    indicesIsToday.value = result.is_today !== false
+  } catch (error) {
+    console.error('加载市场指数失败:', error)
+  } finally {
+    indicesLoading.value = false
+  }
+}
+
+// 格式化指数日期显示
+function formatIndicesDate(dateStr) {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  const month = d.getMonth() + 1
+  const day = d.getDate()
+  return `${month}月${day}日`
+}
+
+// 格式化分析时间显示
+function formatAnalysisTime(dateStr) {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  const year = d.getFullYear()
+  const month = d.getMonth() + 1
+  const day = d.getDate()
+  const hour = d.getHours().toString().padStart(2, '0')
+  const minute = d.getMinutes().toString().padStart(2, '0')
+  return `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')} ${hour}:${minute}`
+}
+
+// AI 持仓分析 - 加载缓存
+async function loadPortfolioAnalysis() {
   portfolioLoading.value = true
   try {
-    const result = await aiAPI.analyze()
+    // 先尝试获取缓存
+    const result = await aiAPI.analyze(false, true)
+    if (result.no_cache) {
+      // 没有缓存，不显示弹窗
+      portfolioAnalysis.value = null
+    } else {
+      portfolioAnalysis.value = result
+    }
+  } catch (error) {
+    console.error('加载分析缓存失败:', error)
+  } finally {
+    portfolioLoading.value = false
+  }
+}
+
+// AI 持仓分析 - 刷新分析
+async function refreshPortfolioAnalysis() {
+  portfolioLoading.value = true
+  try {
+    const result = await aiAPI.analyze(true, false)
     if (result.error) throw new Error(result.error)
     portfolioAnalysis.value = result
   } catch (error) {
     ElMessage.error(error.message || '分析失败')
   } finally {
     portfolioLoading.value = false
+  }
+}
+
+// AI 持仓分析 - 打开弹窗
+async function openAnalysisDialog() {
+  // 先尝试加载缓存
+  await loadPortfolioAnalysis()
+  // 如果没有缓存，则进行新分析
+  if (!portfolioAnalysis.value) {
+    await refreshPortfolioAnalysis()
   }
 }
 
@@ -122,7 +266,9 @@ onMounted(async () => {
   await Promise.all([
     fundStore.loadFunds(),
     fundStore.loadHoldingsSummary(),
-    fundStore.loadAISettings()
+    fundStore.loadAISettings(),
+    fundStore.loadRecentTrades(10),
+    loadIndices()
   ])
   
   // 需要在数据加载后初始化图表
@@ -190,7 +336,7 @@ onUnmounted(() => {
 
     <!-- 操作按钮 -->
     <div class="action-bar">
-      <el-button type="primary" size="large" @click="analyzePortfolio" :loading="portfolioLoading">
+      <el-button type="primary" size="large" @click="openAnalysisDialog" :loading="portfolioLoading">
         <el-icon><MagicStick /></el-icon>
         AI 持仓分析
       </el-button>
@@ -198,11 +344,55 @@ onUnmounted(() => {
 
     <!-- 数据卡片 -->
     <el-row :gutter="20">
+      <!-- 市场概况 -->
+      <el-col :span="12">
+        <div class="data-card">
+          <div class="card-header">
+            <span class="title">市场概况</span>
+            <el-tag size="small" :type="indicesIsToday ? 'success' : 'info'" v-if="indicesData.length">
+              {{ indicesIsToday ? '今日' : formatIndicesDate(indicesDate) }}
+            </el-tag>
+          </div>
+          <div class="card-body">
+            <div class="indices-grid" v-loading="indicesLoading">
+              <div 
+                v-for="index in indicesData" 
+                :key="index.code" 
+                class="index-item"
+                :class="{ up: index.change_pct > 0, down: index.change_pct < 0 }"
+              >
+                <div class="index-name">{{ index.name }}</div>
+                <div class="index-price">{{ index.price?.toFixed(2) }}</div>
+                <div class="index-change">
+                  <span>{{ index.change > 0 ? '+' : '' }}{{ index.change?.toFixed(2) }}</span>
+                  <span class="change-pct">{{ index.change_pct > 0 ? '+' : '' }}{{ index.change_pct?.toFixed(2) }}%</span>
+                </div>
+              </div>
+              <el-empty v-if="!indicesLoading && indicesData.length === 0" description="暂无数据" :image-size="60" />
+            </div>
+          </div>
+        </div>
+      </el-col>
+      
       <!-- 持仓分布 -->
       <el-col :span="12">
         <div class="data-card">
           <div class="card-header">
             <span class="title">持仓分布</span>
+            <el-button-group size="small">
+              <el-button 
+                :type="chartType === 'pie' ? 'primary' : ''" 
+                @click="chartType = 'pie'; updateChart()"
+              >
+                <el-icon><PieChart /></el-icon>
+              </el-button>
+              <el-button 
+                :type="chartType === 'treemap' ? 'primary' : ''" 
+                @click="chartType = 'treemap'; updateChart()"
+              >
+                <el-icon><Grid /></el-icon>
+              </el-button>
+            </el-button-group>
           </div>
           <div class="card-body">
             <div ref="pieChart" class="chart-container"></div>
@@ -210,51 +400,22 @@ onUnmounted(() => {
         </div>
       </el-col>
       
-      <!-- 今日涨跌 -->
+      <!-- 我的持仓（合并涨跌和明细） -->
       <el-col :span="12">
         <div class="data-card">
           <div class="card-header">
-            <span class="title">今日涨跌</span>
-            <el-tag size="small" type="info">{{ sortedHoldings.length }} 只</el-tag>
-          </div>
-          <div class="card-body">
-            <el-scrollbar height="240px">
-              <div class="list-container">
-                <div
-                  v-for="fund in sortedHoldings"
-                  :key="fund.fund_code"
-                  class="change-item"
-                  @click="goToFund(fund.fund_code)"
-                >
-                  <div class="item-left">
-                    <span class="name">{{ fund.fund_name }}</span>
-                    <span class="code">{{ fund.fund_code }}</span>
-                  </div>
-                  <div class="item-right">
-                    <span class="change" :class="{ positive: fund.last_growth_rate > 0, negative: fund.last_growth_rate < 0 }">
-                      {{ fund.last_growth_rate ? (fund.last_growth_rate > 0 ? '+' : '') + fund.last_growth_rate.toFixed(2) + '%' : '-' }}
-                    </span>
-                  </div>
-                </div>
-                <el-empty v-if="sortedHoldings.length === 0" description="暂无持仓" :image-size="60" />
-              </div>
-            </el-scrollbar>
-          </div>
-        </div>
-      </el-col>
-      
-      <!-- 持仓明细 -->
-      <el-col :span="12">
-        <div class="data-card">
-          <div class="card-header">
-            <span class="title">持仓明细</span>
-            <el-tag size="small" type="info">{{ fundStore.hasHoldingFunds.length }} 只</el-tag>
+            <span class="title">我的持仓</span>
+            <div class="header-stats">
+              <el-tag size="small" type="danger" v-if="changeStats.up > 0">{{ changeStats.up }} 涨</el-tag>
+              <el-tag size="small" type="success" v-if="changeStats.down > 0">{{ changeStats.down }} 跌</el-tag>
+              <el-tag size="small" type="info">{{ changeStats.total }} 只</el-tag>
+            </div>
           </div>
           <div class="card-body">
             <el-scrollbar height="280px">
               <div class="list-container">
                 <div
-                  v-for="fund in fundStore.hasHoldingFunds"
+                  v-for="fund in sortedHoldings"
                   :key="fund.fund_code"
                   class="holding-item"
                   @click="goToFund(fund.fund_code)"
@@ -265,12 +426,17 @@ onUnmounted(() => {
                   </div>
                   <div class="item-right">
                     <div class="market-value">{{ formatCurrency(parseFloat(fund.total_shares) * parseFloat(fund.last_net_value || 0)) }}</div>
-                    <div class="profit" :class="{ positive: fund.last_growth_rate > 0, negative: fund.last_growth_rate < 0 }">
-                      {{ formatCurrency(parseFloat(fund.total_shares) * parseFloat(fund.last_net_value || 0) - parseFloat(fund.total_cost || 0)) }}
+                    <div class="detail-row">
+                      <span class="profit" :class="{ positive: fund.total_cost && (parseFloat(fund.total_shares) * parseFloat(fund.last_net_value || 0) - parseFloat(fund.total_cost)) > 0, negative: fund.total_cost && (parseFloat(fund.total_shares) * parseFloat(fund.last_net_value || 0) - parseFloat(fund.total_cost)) < 0 }">
+                        {{ formatCurrency(parseFloat(fund.total_shares) * parseFloat(fund.last_net_value || 0) - parseFloat(fund.total_cost || 0)) }}
+                      </span>
+                      <span class="today-change" :class="{ positive: fund.last_growth_rate > 0, negative: fund.last_growth_rate < 0 }">
+                        {{ fund.last_growth_rate ? (fund.last_growth_rate > 0 ? '+' : '') + fund.last_growth_rate.toFixed(2) + '%' : '-' }}
+                      </span>
                     </div>
                   </div>
                 </div>
-                <el-empty v-if="fundStore.hasHoldingFunds.length === 0" description="暂无持仓" :image-size="60" />
+                <el-empty v-if="sortedHoldings.length === 0" description="暂无持仓" :image-size="60" />
               </div>
             </el-scrollbar>
           </div>
@@ -317,6 +483,21 @@ onUnmounted(() => {
         <span>正在分析您的持仓组合...</span>
       </div>
       <div v-else-if="portfolioAnalysis">
+        <!-- 分析时间和缓存状态 -->
+        <div class="analysis-header">
+          <div class="analysis-time">
+            <el-icon><Clock /></el-icon>
+            <span>分析时间：{{ formatAnalysisTime(portfolioAnalysis.timestamp) }}</span>
+          </div>
+          <div class="analysis-actions">
+            <el-tag v-if="portfolioAnalysis.cached" type="warning" size="small">缓存</el-tag>
+            <el-tag v-else type="success" size="small">最新</el-tag>
+            <el-button type="primary" size="small" @click="refreshPortfolioAnalysis" :loading="portfolioLoading">
+              <el-icon><Refresh /></el-icon>
+              刷新分析
+            </el-button>
+          </div>
+        </div>
         <!-- 汇总 -->
         <div class="analysis-summary">
           <div class="summary-item">
@@ -483,6 +664,11 @@ onUnmounted(() => {
   color: #1a1a2e;
 }
 
+.card-header .header-stats {
+  display: flex;
+  gap: 6px;
+}
+
 .card-body {
   padding: 16px 20px;
 }
@@ -490,6 +676,68 @@ onUnmounted(() => {
 .chart-container {
   width: 100%;
   height: 240px;
+  overflow: hidden;
+}
+
+/* 市场指数 */
+.indices-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 12px;
+  height: 240px;
+}
+
+.index-item {
+  text-align: center;
+  padding: 12px 8px;
+  background: #f5f7fa;
+  border-radius: 8px;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.index-item.up {
+  background: #fef0f0;
+}
+
+.index-item.down {
+  background: #f0f9eb;
+}
+
+.index-name {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 4px;
+}
+
+.index-price {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin-bottom: 4px;
+}
+
+.index-change {
+  font-size: 12px;
+  color: #909399;
+}
+
+.index-item.up .index-price,
+.index-item.up .index-change {
+  color: #f56c6c;
+}
+
+.index-item.down .index-price,
+.index-item.down .index-change {
+  color: #67c23a;
+}
+
+.change-pct {
+  margin-left: 4px;
+  font-weight: 600;
 }
 
 /* 列表容器 */
@@ -497,8 +745,8 @@ onUnmounted(() => {
   margin: -4px 0;
 }
 
-/* 涨跌项 */
-.change-item, .holding-item, .trade-item {
+/* 持仓项 */
+.holding-item, .trade-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -508,11 +756,11 @@ onUnmounted(() => {
   transition: background 0.2s;
 }
 
-.change-item:last-child, .holding-item:last-child, .trade-item:last-child {
+.holding-item:last-child, .trade-item:last-child {
   border-bottom: none;
 }
 
-.change-item:hover, .holding-item:hover, .trade-item:hover {
+.holding-item:hover, .trade-item:hover {
   background: #fafafa;
   margin: 0 -20px;
   padding: 12px 20px;
@@ -539,32 +787,38 @@ onUnmounted(() => {
   text-align: right;
 }
 
-.change {
-  font-size: 15px;
-  font-weight: 600;
-  padding: 4px 12px;
-  border-radius: 6px;
-}
-
-.change.positive {
-  color: #f56c6c;
-  background: #fef0f0;
-}
-
-.change.negative {
-  color: #67c23a;
-  background: #f0f9eb;
-}
-
 .holding-item .market-value {
   font-weight: 600;
   font-size: 14px;
   color: #1a1a2e;
 }
 
+.holding-item .detail-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
 .holding-item .profit {
   font-size: 12px;
-  margin-top: 2px;
+}
+
+.today-change {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.today-change.positive {
+  color: #f56c6c;
+  background: #fef0f0;
+}
+
+.today-change.negative {
+  color: #67c23a;
+  background: #f0f9eb;
 }
 
 .amount.buy {
@@ -612,6 +866,31 @@ onUnmounted(() => {
   font-size: 16px;
   font-weight: 600;
   color: #1a1a2e;
+}
+
+/* 分析头部 */
+.analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-radius: 8px;
+}
+
+.analysis-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.analysis-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .analysis-content {

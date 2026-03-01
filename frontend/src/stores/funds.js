@@ -96,6 +96,16 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
+  // 加载所有近期交易（首页用）
+  async function loadRecentTrades(limit = 10) {
+    try {
+      const result = await tradeAPI.getAll(null, limit)
+      recentTrades.value = result.data || []
+    } catch (error) {
+      console.error('加载近期交易失败:', error)
+    }
+  }
+
   // 加载 ETF 数据
   async function loadETFData(etfCode) {
     if (!etfCode) {
@@ -303,6 +313,7 @@ export const useFundStore = defineStore('fund', () => {
     selectFund,
     loadChartData,
     loadTradePreview,
+    loadRecentTrades,
     loadETFData,
     addFund,
     deleteFund,
