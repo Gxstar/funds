@@ -2,8 +2,6 @@
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 import uvicorn
 
 from database.connection import init_db
@@ -63,15 +61,6 @@ app.include_router(trades_router)
 app.include_router(market_router)
 app.include_router(ai_router)
 app.include_router(etf_router)
-
-# 静态文件
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-
-@app.get("/")
-async def index():
-    """主页面"""
-    return FileResponse("templates/index.html")
 
 
 @app.get("/api/health")
