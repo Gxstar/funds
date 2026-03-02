@@ -1,10 +1,9 @@
-"""市场情绪服务"""
+"""市场情绪服务 - 使用 akshare 获取数据"""
 from datetime import datetime, date, timedelta
 from typing import Optional, Dict
 import logging
 import threading
-import httpx
-import re
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,7 @@ sentiment_cache = MarketSentimentCache()
 
 
 class MarketSentimentService:
-    """市场情绪服务"""
+    """市场情绪服务 - 基于 akshare"""
     
     # 主要指数代码映射（腾讯接口格式）
     INDEX_MAPPING = {
@@ -67,7 +66,6 @@ class MarketSentimentService:
         
         try:
             # 并行获取数据
-            import asyncio
             market_breadth, north_flow, index_data = await asyncio.gather(
                 MarketSentimentService._get_market_breadth(),
                 MarketSentimentService._get_north_flow(),
@@ -92,92 +90,147 @@ class MarketSentimentService:
     
     @staticmethod
     async def _get_market_breadth() -> Optional[Dict]:
-        """获取大盘涨跌家数统计（通过腾讯接口）"""
+        """获取大盘涨跌家数统计 - 使用 akshare"""
         try:
-            # 使用腾讯接口获取 A 股实时数据统计
-            # 这里用一个简化的方法：获取主要指数成分股统计
-            url = "https://web.sqt.gtimg.cn/q=sh000001,sz399001,sz399006"
+            # 在线程池中运行同步的 akshare 调用
+            loop = asyncio.get_event_loop()
             
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(url)
-                if resp.status_code != 200:
-                    return None
-                
-                text = resp.text
-                # 解析返回数据
-                index_info = {}
-                for match in re.finditer(r'v_([^=]+)="([^"]+)"', text):
-                    code = match.group(1)
-                    parts = match.group(2).split('~')
-                    if len(parts) > 32:
-                        index_info[code] = {
-                            "name": parts[1],
-                            "price": float(parts[3]) if parts[3] else 0,
-                            "change_pct": float(parts[32]) if parts[32] and parts[32] != '-' else 0,
-                        }
-                
-                return {
-                    "indices": index_info,
-                    "description": MarketSentimentService._describe_market(index_info)
-                }
+            def _fetch_stock_data():
+                import akshare as ak
+                # 获取所有A股实时行情
+                df = ak.stock_zh_a_spot_em()
+                return df
+            
+            df = await loop.run_in_executor(None, _fetch_stock_data)
+            
+            if df is None or df.empty:
+                return None
+            
+            up_count = 0  # 上涨
+            down_count = 0  # 下跌
+            flat_count = 0  # 平盘
+            limit_up = 0  # 涨停
+            limit_down = 0  # 跌停
+            
+            # 遍历统计
+            for _, row in df.iterrows():
+                change_pct = row.get('涨跌幅', 0)
+                if change_pct is None:
+                    continue
+                try:
+                    change_pct = float(change_pct)
+                except (ValueError, TypeError):
+                    continue
+                    
+                if change_pct > 0:
+                    up_count += 1
+                    if change_pct >= 9.8:
+                        limit_up += 1
+                elif change_pct < 0:
+                    down_count += 1
+                    if change_pct <= -9.8:
+                        limit_down += 1
+                else:
+                    flat_count += 1
+            
+            total = up_count + down_count + flat_count
+            
+            if total < 1000:  # 数据不足
+                logger.warning(f"涨跌家数数据不足: {total}")
+                return None
+            
+            up_ratio = (up_count / total * 100) if total > 0 else 0
+            
+            return {
+                "up_count": up_count,
+                "down_count": down_count,
+                "flat_count": flat_count,
+                "limit_up": limit_up,
+                "limit_down": limit_down,
+                "total": total,
+                "up_ratio": round(up_ratio, 1),
+                "description": MarketSentimentService._describe_market_breadth(up_count, down_count, total),
+                "source": "akshare"
+            }
                 
         except Exception as e:
             logger.error(f"获取大盘涨跌统计失败: {e}")
             return None
     
     @staticmethod
-    def _describe_market(index_info: Dict) -> str:
-        """描述市场情绪"""
-        if not index_info:
-            return "数据获取失败"
+    def _describe_market_breadth(up_count: int, down_count: int, total: int) -> str:
+        """根据涨跌家数描述市场情绪"""
+        if total == 0:
+            return "数据不足"
         
-        up_count = sum(1 for v in index_info.values() if v.get("change_pct", 0) > 0)
-        total = len(index_info)
+        up_ratio = up_count / total * 100
         
-        if up_count == total:
-            return "市场整体上涨，情绪偏乐观"
-        elif up_count == 0:
-            return "市场整体下跌，情绪偏悲观"
-        elif up_count > total / 2:
-            return "市场多数上涨，情绪中性偏多"
+        if up_ratio >= 80:
+            return "市场普涨，情绪极度乐观（注意追高风险）"
+        elif up_ratio >= 60:
+            return "市场多数上涨，情绪偏乐观"
+        elif up_ratio >= 40:
+            return "市场涨跌互现，情绪中性"
+        elif up_ratio >= 20:
+            return "市场多数下跌，情绪偏悲观"
         else:
-            return "市场多数下跌，情绪中性偏空"
+            return "市场普跌，情绪极度悲观（可能存在反弹机会）"
     
     @staticmethod
     async def _get_north_flow() -> Optional[Dict]:
-        """获取北向资金流向（通过腾讯接口）"""
+        """获取北向资金流向 - 使用 akshare"""
         try:
-            # 腾讯沪深港通数据
-            url = "https://web.sqt.gtimg.cn/q=hk00700,sh000001"
+            loop = asyncio.get_event_loop()
             
-            async with httpx.AsyncClient(timeout=10) as client:
-                # 尝试从东方财富获取北向资金（备用方案）
-                # 由于东方财富接口可能被封，这里用腾讯的港股数据作为代理指标
-                resp = await client.get(url)
-                if resp.status_code != 200:
-                    return None
-                
-                # 返回基本信息，实际北向资金需要专用接口
-                return {
-                    "available": False,
-                    "message": "北向资金数据暂时不可用",
-                    "alternative": "可参考港股走势作为外资情绪参考"
-                }
+            def _fetch_north_flow():
+                import akshare as ak
+                # 获取北向资金历史数据（最近一天）
+                df = ak.stock_hsgt_hist_em(symbol="北向资金")
+                return df
+            
+            df = await loop.run_in_executor(None, _fetch_north_flow)
+            
+            if df is None or df.empty:
+                return None
+            
+            # 获取最新一行数据
+            latest = df.iloc[-1]
+            
+            # 北向资金净流入
+            date_str = str(latest.get('日期', ''))
+            net_inflow = float(latest.get('当日成交净买额', 0)) if latest.get('当日成交净买额') else 0
+            
+            return {
+                "available": True,
+                "net_inflow": net_inflow,
+                "date": date_str,
+                "description": f"净流入{net_inflow:.2f}亿" if net_inflow >= 0 else f"净流出{abs(net_inflow):.2f}亿"
+            }
                 
         except Exception as e:
             logger.error(f"获取北向资金失败: {e}")
-            return None
+            return {
+                "available": False,
+                "message": "北向资金数据暂时不可用",
+                "alternative": "可参考港股走势或A50期指作为外资情绪参考"
+            }
     
     @staticmethod
     async def _get_index_data() -> Optional[Dict]:
-        """获取主要指数数据"""
+        """获取主要指数数据 - 使用 akshare"""
         try:
-            # 构建请求
-            codes = ",".join(MarketSentimentService.INDEX_MAPPING.values())
-            url = f"https://web.sqt.gtimg.cn/q={codes}"
+            loop = asyncio.get_event_loop()
             
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(url)
+            def _fetch_index_data():
+                import akshare as ak
+                import httpx
+                import re
+                
+                # 使用腾讯接口获取指数数据（更稳定）
+                codes = ",".join(MarketSentimentService.INDEX_MAPPING.values())
+                url = f"https://web.sqt.gtimg.cn/q={codes}"
+                
+                resp = httpx.get(url, timeout=10)
                 if resp.status_code != 200:
                     return None
                 
@@ -206,6 +259,9 @@ class MarketSentimentService:
                         }
                 
                 return indices
+            
+            indices = await loop.run_in_executor(None, _fetch_index_data)
+            return indices
                 
         except Exception as e:
             logger.error(f"获取指数数据失败: {e}")
@@ -224,11 +280,43 @@ class MarketSentimentService:
                 change_str = f"+{info['change_pct']:.2f}%" if info['change_pct'] > 0 else f"{info['change_pct']:.2f}%"
                 lines.append(f"- {info['name']}: {info['price']:.2f} ({change_str})")
         
-        # 市场情绪描述
+        # 涨跌家数统计
         market_breadth = sentiment.get("market_breadth")
-        if market_breadth and market_breadth.get("description"):
-            lines.append(f"\n### 市场情绪")
-            lines.append(f"- {market_breadth['description']}")
+        if market_breadth:
+            lines.append(f"\n### A股涨跌家数")
+            
+            up_count = market_breadth.get("up_count")
+            down_count = market_breadth.get("down_count")
+            
+            # 只有当 up_count 和 down_count 都有有效值时才显示详细统计
+            if up_count is not None and down_count is not None and market_breadth.get("total", 0) > 1000:
+                lines.append(f"- 上涨: {up_count} 只")
+                lines.append(f"- 下跌: {down_count} 只")
+                lines.append(f"- 平盘: {market_breadth.get('flat_count', 0)} 只")
+                lines.append(f"- 涨停: {market_breadth.get('limit_up', 0)} 只")
+                lines.append(f"- 跌停: {market_breadth.get('limit_down', 0)} 只")
+                lines.append(f"- 上涨比例: {market_breadth.get('up_ratio', 0)}%")
+                lines.append(f"- 市场情绪: {market_breadth.get('description', '')}")
+            else:
+                lines.append("- 数据暂不可用，请以指数走势为主要参考")
+        
+        # 北向资金
+        north_flow = sentiment.get("north_flow")
+        lines.append(f"\n### 北向资金")
+        if north_flow:
+            if north_flow.get("available") and north_flow.get("net_inflow") is not None:
+                inflow = north_flow.get("net_inflow")
+                if inflow >= 0:
+                    lines.append(f"- 净流入: +{inflow:.2f} 亿元")
+                else:
+                    lines.append(f"- 净流出: {abs(inflow):.2f} 亿元")
+                lines.append(f"- 日期: {north_flow.get('date', '')}")
+            else:
+                lines.append(f"- 状态: {north_flow.get('message', '数据暂不可用')}")
+                if north_flow.get("alternative"):
+                    lines.append(f"- 参考: {north_flow['alternative']}")
+        else:
+            lines.append("- 数据暂不可用")
         
         if not lines:
             return "市场情绪数据暂不可用"

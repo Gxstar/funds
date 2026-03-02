@@ -382,6 +382,25 @@ class AIService:
             logger.warning(f"获取新闻失败: {e}")
             news_info = "相关新闻暂不可用"
         
+        # 获取用户交易历史（近10笔）
+        try:
+            trades = FundService.get_trades(fund_code, limit=10)
+            if trades:
+                trade_list = []
+                for t in trades:
+                    trade_type = "买入" if t["trade_type"] == "BUY" else "卖出"
+                    trade_date = t["trade_date"]
+                    amount = float(t.get("amount", 0))
+                    shares = float(t.get("confirm_shares", 0)) if t.get("confirm_shares") else 0
+                    nav = float(t.get("confirm_net_value", 0)) if t.get("confirm_net_value") else 0
+                    trade_list.append(f"- {trade_date} {trade_type}: ¥{amount:,.0f} ({shares:.2f}份, 净值{nav:.4f})")
+                trade_history = "\n".join(trade_list)
+            else:
+                trade_history = "暂无交易记录"
+        except Exception as e:
+            logger.warning(f"获取交易历史失败: {e}")
+            trade_history = "交易历史暂不可用"
+        
         # 格式化风险指标
         risk_info = "风险指标数据不足"
         if risk_metrics:
@@ -415,7 +434,8 @@ class AIService:
             market_sentiment=market_sentiment_info,
             fund_detail=fund_detail_info,
             risk_metrics=risk_info,
-            related_news=news_info
+            related_news=news_info,
+            trade_history=trade_history
         )
         
         try:
@@ -627,6 +647,36 @@ class AIService:
             logger.warning(f"获取新闻失败: {e}")
             related_news = "暂无相关新闻"
         
+        # 获取账户交易历史汇总（近20笔）
+        try:
+            all_trades = FundService.get_trades(limit=20)
+            if all_trades:
+                # 统计买入卖出情况
+                buy_count = sum(1 for t in all_trades if t["trade_type"] == "BUY")
+                sell_count = sum(1 for t in all_trades if t["trade_type"] == "SELL")
+                buy_amount = sum(float(t.get("amount", 0)) for t in all_trades if t["trade_type"] == "BUY")
+                sell_amount = sum(float(t.get("amount", 0)) for t in all_trades if t["trade_type"] == "SELL")
+                
+                # 构建交易明细
+                trade_list = []
+                for t in all_trades[:15]:  # 显示最近15笔
+                    trade_type = "买入" if t["trade_type"] == "BUY" else "卖出"
+                    fund_name = t.get("fund_name", t["fund_code"])[:10]
+                    trade_list.append(f"- {t['trade_date']} {fund_name} {trade_type}: ¥{float(t.get('amount', 0)):,.0f}")
+                
+                trade_summary = f"""### 交易统计（近{len(all_trades)}笔）
+- 买入次数: {buy_count} 次，合计 ¥{buy_amount:,.0f}
+- 卖出次数: {sell_count} 次，合计 ¥{sell_amount:,.0f}
+- 净买入: ¥{buy_amount - sell_amount:,.0f}
+
+### 最近交易明细
+{chr(10).join(trade_list)}"""
+            else:
+                trade_summary = "暂无交易记录"
+        except Exception as e:
+            logger.warning(f"获取交易历史失败: {e}")
+            trade_summary = "交易历史暂不可用"
+        
         # 从配置文件加载提示词
         system_prompt, user_prompt_template = get_portfolio_analysis_prompts()
         
@@ -636,7 +686,9 @@ class AIService:
             market_sentiment=market_sentiment,
             account_summary=account_summary,
             holdings_detail=holdings_detail,
-            related_news=related_news
+            related_news=related_news,
+            trade_summary=trade_summary,
+            available_amount=float(available)
         )
         
         try:
