@@ -541,6 +541,7 @@ onUnmounted(() => {
 
 <style scoped>
 .home-page {
+  width: 100%;
   max-width: 1400px;
 }
 

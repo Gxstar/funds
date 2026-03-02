@@ -4,8 +4,14 @@ from typing import Optional, Dict
 import logging
 import threading
 import asyncio
+import httpx
 
 logger = logging.getLogger(__name__)
+
+# 请求超时和重试配置
+REQUEST_TIMEOUT = 15
+MAX_RETRIES = 3
+RETRY_DELAY = 1  # 秒
 
 
 class MarketSentimentCache:
@@ -90,53 +96,141 @@ class MarketSentimentService:
     
     @staticmethod
     async def _get_market_breadth() -> Optional[Dict]:
-        """获取大盘涨跌家数统计 - 使用 akshare"""
+        """获取大盘涨跌家数统计 - 使用 akshare，带重试机制"""
+        loop = asyncio.get_event_loop()
+        
+        for attempt in range(MAX_RETRIES):
+            try:
+                def _fetch_stock_data():
+                    import akshare as ak
+                    # 获取所有A股实时行情
+                    df = ak.stock_zh_a_spot_em()
+                    return df
+                
+                # 增加超时时间
+                df = await asyncio.wait_for(
+                    loop.run_in_executor(None, _fetch_stock_data),
+                    timeout=30  # 30秒超时
+                )
+                
+                if df is None or df.empty:
+                    continue
+                
+                up_count = 0  # 上涨
+                down_count = 0  # 下跌
+                flat_count = 0  # 平盘
+                limit_up = 0  # 涨停
+                limit_down = 0  # 跌停
+                
+                # 遍历统计
+                for _, row in df.iterrows():
+                    change_pct = row.get('涨跌幅', 0)
+                    if change_pct is None:
+                        continue
+                    try:
+                        change_pct = float(change_pct)
+                    except (ValueError, TypeError):
+                        continue
+                        
+                    if change_pct > 0:
+                        up_count += 1
+                        if change_pct >= 9.8:
+                            limit_up += 1
+                    elif change_pct < 0:
+                        down_count += 1
+                        if change_pct <= -9.8:
+                            limit_down += 1
+                    else:
+                        flat_count += 1
+                
+                total = up_count + down_count + flat_count
+                
+                if total < 1000:  # 数据不足
+                    logger.warning(f"涨跌家数数据不足: {total}")
+                    continue
+                
+                up_ratio = (up_count / total * 100) if total > 0 else 0
+                
+                return {
+                    "up_count": up_count,
+                    "down_count": down_count,
+                    "flat_count": flat_count,
+                    "limit_up": limit_up,
+                    "limit_down": limit_down,
+                    "total": total,
+                    "up_ratio": round(up_ratio, 1),
+                    "description": MarketSentimentService._describe_market_breadth(up_count, down_count, total),
+                    "source": "akshare"
+                }
+                    
+            except asyncio.TimeoutError:
+                logger.warning(f"获取大盘涨跌统计超时 (尝试 {attempt + 1}/{MAX_RETRIES})")
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(RETRY_DELAY)
+            except Exception as e:
+                logger.warning(f"获取大盘涨跌统计失败 (尝试 {attempt + 1}/{MAX_RETRIES}): {type(e).__name__}: {e}")
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(RETRY_DELAY)
+        
+        # 所有重试都失败，尝试备用方案
+        logger.info("尝试使用备用接口获取涨跌家数")
+        return await MarketSentimentService._get_market_breadth_fallback()
+    
+    @staticmethod
+    async def _get_market_breadth_fallback() -> Optional[Dict]:
+        """备用方案：使用更轻量的接口获取涨跌家数"""
         try:
-            # 在线程池中运行同步的 akshare 调用
             loop = asyncio.get_event_loop()
             
-            def _fetch_stock_data():
-                import akshare as ak
-                # 获取所有A股实时行情
-                df = ak.stock_zh_a_spot_em()
-                return df
+            def _fetch_fallback():
+                import httpx
+                # 东方财富涨跌家数接口（更轻量）
+                url = "https://push2.eastmoney.com/api/qt/clist/get"
+                params = {
+                    "fid": "f3",
+                    "po": "1",
+                    "pz": "5000",
+                    "pn": "1",
+                    "np": "1",
+                    "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+                    "fltt": "2",
+                    "invt": "2",
+                    "fs": "m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23",
+                    "fields": "f12,f14,f2,f3,f4"
+                }
+                resp = httpx.get(url, params=params, timeout=REQUEST_TIMEOUT)
+                if resp.status_code != 200:
+                    return None
+                return resp.json()
             
-            df = await loop.run_in_executor(None, _fetch_stock_data)
+            data = await loop.run_in_executor(None, _fetch_fallback)
             
-            if df is None or df.empty:
+            if not data or "data" not in data or "diff" not in data["data"]:
                 return None
             
-            up_count = 0  # 上涨
-            down_count = 0  # 下跌
-            flat_count = 0  # 平盘
-            limit_up = 0  # 涨停
-            limit_down = 0  # 跌停
+            up_count = 0
+            down_count = 0
+            flat_count = 0
             
-            # 遍历统计
-            for _, row in df.iterrows():
-                change_pct = row.get('涨跌幅', 0)
+            for item in data["data"]["diff"]:
+                change_pct = item.get("f3", 0)
                 if change_pct is None:
                     continue
                 try:
                     change_pct = float(change_pct)
                 except (ValueError, TypeError):
                     continue
-                    
+                
                 if change_pct > 0:
                     up_count += 1
-                    if change_pct >= 9.8:
-                        limit_up += 1
                 elif change_pct < 0:
                     down_count += 1
-                    if change_pct <= -9.8:
-                        limit_down += 1
                 else:
                     flat_count += 1
             
             total = up_count + down_count + flat_count
             
-            if total < 1000:  # 数据不足
-                logger.warning(f"涨跌家数数据不足: {total}")
+            if total < 1000:
                 return None
             
             up_ratio = (up_count / total * 100) if total > 0 else 0
@@ -145,16 +239,16 @@ class MarketSentimentService:
                 "up_count": up_count,
                 "down_count": down_count,
                 "flat_count": flat_count,
-                "limit_up": limit_up,
-                "limit_down": limit_down,
+                "limit_up": None,  # 备用接口不提供涨停数
+                "limit_down": None,
                 "total": total,
                 "up_ratio": round(up_ratio, 1),
                 "description": MarketSentimentService._describe_market_breadth(up_count, down_count, total),
-                "source": "akshare"
+                "source": "eastmoney_fallback"
             }
-                
+            
         except Exception as e:
-            logger.error(f"获取大盘涨跌统计失败: {e}")
+            logger.warning(f"备用接口获取涨跌家数也失败: {e}")
             return None
     
     @staticmethod
@@ -178,7 +272,7 @@ class MarketSentimentService:
     
     @staticmethod
     async def _get_north_flow() -> Optional[Dict]:
-        """获取北向资金流向 - 使用 akshare"""
+        """获取北向资金流向 - 使用 akshare，带超时处理"""
         try:
             loop = asyncio.get_event_loop()
             
@@ -188,7 +282,10 @@ class MarketSentimentService:
                 df = ak.stock_hsgt_hist_em(symbol="北向资金")
                 return df
             
-            df = await loop.run_in_executor(None, _fetch_north_flow)
+            df = await asyncio.wait_for(
+                loop.run_in_executor(None, _fetch_north_flow),
+                timeout=20  # 20秒超时
+            )
             
             if df is None or df.empty:
                 return None
@@ -207,8 +304,15 @@ class MarketSentimentService:
                 "description": f"净流入{net_inflow:.2f}亿" if net_inflow >= 0 else f"净流出{abs(net_inflow):.2f}亿"
             }
                 
+        except asyncio.TimeoutError:
+            logger.warning("获取北向资金超时")
+            return {
+                "available": False,
+                "message": "北向资金数据请求超时",
+                "alternative": "可参考港股走势或A50期指作为外资情绪参考"
+            }
         except Exception as e:
-            logger.error(f"获取北向资金失败: {e}")
+            logger.warning(f"获取北向资金失败: {e}")
             return {
                 "available": False,
                 "message": "北向资金数据暂时不可用",

@@ -5,7 +5,6 @@ from typing import Optional, List
 import logging
 
 from database.connection import get_db_context
-from database.models import Fund, Holding, Trade
 
 logger = logging.getLogger(__name__)
 

@@ -123,6 +123,84 @@ class AICache:
         return cache is not None
 
 
+def get_trading_time_info() -> dict:
+    """获取交易时间信息
+    
+    Returns:
+        dict: 包含时间信息的字典
+            - time_info: 当前时间信息文本
+            - time_based_action: 基于时间的操作建议提示
+    """
+    now = datetime.now()
+    current_time = now.strftime("%Y-%m-%d %H:%M:%S")
+    weekday = now.weekday()  # 0=周一, 6=周日
+    
+    # 判断是否为交易日（周一至周五）
+    is_trading_day = weekday < 5
+    
+    # 判断当前时间是否在15:00之前
+    current_hour_minute = now.hour * 60 + now.minute
+    market_close_time = 15 * 60  # 15:00 = 900分钟
+    is_before_close = current_hour_minute < market_close_time
+    
+    # 构建时间信息
+    weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    weekday_name = weekday_names[weekday]
+    
+    time_info = f"- 当前时间: {current_time} ({weekday_name})\n"
+    
+    if is_trading_day:
+        if is_before_close:
+            time_info += f"- 交易状态: 交易日，当前处于交易时段（15:00前）"
+        else:
+            time_info += f"- 交易状态: 交易日，已收盘（15:00后）"
+    else:
+        time_info += f"- 交易状态: 非交易日（周末或节假日）"
+    
+    # 构建基于时间的操作建议提示
+    if is_trading_day:
+        if is_before_close:
+            # 交易日15:00前，给出当天买卖建议（重点参考ETF实时行情）
+            time_based_action = """#### 当日操作建议（今日15:00前可执行）
+
+**重要：请重点参考「关联ETF当日行情」的实时数据做出判断！**
+
+- **ETF实时分析**：
+  - 查看关联ETF当前涨跌幅，判断板块今日强弱
+  - 如有主力资金流向数据，判断大资金态度（流入利好，流出利空）
+  - 结合ETF盘中走势（今开、最高、最低）判断日内波动幅度
+
+- **操作方向**: 建议今天买入 / 卖出 / 观望
+- **建议金额/份额**: 给出具体数字（如：今天可买入500元）
+- **ETF行情依据**: 明确说明ETF实时数据如何支撑你的建议（如：ETF当前涨2%，主力净流入xxx万，说明板块强势，可考虑买入）
+- **注意**: 基金申购按当日净值确认，请在15:00前完成操作"""
+        else:
+            # 交易日15:00后，给出明天的预测
+            time_based_action = """#### 明日操作预判
+
+**参考今日ETF收盘数据预判明日走势**
+
+- **ETF收盘分析**：根据关联ETF今日收盘涨跌、主力资金流向，判断明日板块预期
+- **预判方向**: 建议明天买入 / 卖出 / 观望
+- **建议金额/份额**: 给出具体数字
+- **理由**: 基于今日ETF收盘数据和技术分析，预判明日的操作方向
+- **触发条件**: 明天什么情况下执行（如净值跌破xx时买入）"""
+    else:
+        # 非交易日，跳过当日建议
+        time_based_action = """#### 下一交易日操作预判
+- **当前为非交易日**：可跳过当日操作建议
+- **预判方向**: 建议下一交易日买入 / 卖出 / 观望
+- **建议金额/份额**: 给出具体数字
+- **理由**: 基于最近ETF收盘数据和技术分析，预判下一交易日的操作方向"""
+    
+    return {
+        "time_info": time_info,
+        "time_based_action": time_based_action,
+        "is_trading_day": is_trading_day,
+        "is_before_close": is_before_close
+    }
+
+
 class DeepSeekClient:
     """DeepSeek API 客户端"""
     
@@ -228,7 +306,7 @@ class AIService:
         from services.fund_service import FundService
         from services.market_service import MarketService
         from services.market_sentiment_service import MarketSentimentService
-        from services.fund_detail_service import FundDetailService, ValuationService
+        from services.fund_detail_service import FundDetailService
         from utils.indicators import calculate_risk_metrics
         from decimal import Decimal
         import asyncio
@@ -414,6 +492,9 @@ class AIService:
         # 从配置文件加载提示词
         system_prompt, user_prompt_template = get_fund_analysis_prompts()
         
+        # 获取时间信息
+        time_data = get_trading_time_info()
+        
         # 构建提示词
         prompt = user_prompt_template.format(
             fund_name=fund.get("fund_name", ""),
@@ -435,7 +516,9 @@ class AIService:
             fund_detail=fund_detail_info,
             risk_metrics=risk_info,
             related_news=news_info,
-            trade_history=trade_history
+            trade_history=trade_history,
+            time_info=time_data["time_info"],
+            time_based_action=time_data["time_based_action"]
         )
         
         try:
@@ -680,6 +763,9 @@ class AIService:
         # 从配置文件加载提示词
         system_prompt, user_prompt_template = get_portfolio_analysis_prompts()
         
+        # 获取时间信息
+        time_data = get_trading_time_info()
+        
         # 构建提示词
         prompt = user_prompt_template.format(
             market_indices=market_indices,
@@ -688,7 +774,9 @@ class AIService:
             holdings_detail=holdings_detail,
             related_news=related_news,
             trade_summary=trade_summary,
-            available_amount=float(available)
+            available_amount=float(available),
+            time_info=time_data["time_info"],
+            time_based_action=time_data["time_based_action"]
         )
         
         try:

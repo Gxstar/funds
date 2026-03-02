@@ -58,6 +58,14 @@ export const useFundStore = defineStore('fund', () => {
   async function selectFund(code) {
     loading.value = true
     try {
+      // 先同步最新净值数据
+      try {
+        await marketAPI.sync(code)
+      } catch (syncErr) {
+        console.log('同步净值失败，使用缓存数据:', syncErr)
+      }
+      
+      // 然后加载基金数据
       const fund = await fundAPI.get(code)
       currentFund.value = fund
       

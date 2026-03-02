@@ -291,39 +291,6 @@ class ETFService:
             return None
     
     @staticmethod
-    async def get_etf_intraday(etf_code: str) -> Optional[dict]:
-        """获取 ETF 分时数据"""
-        try:
-            import akshare as ak
-            
-            # 获取分时数据
-            df = ak.fund_etf_fund_daily_em(symbol=etf_code)
-            
-            if df.empty:
-                return None
-            
-            # 转换为列表
-            times = []
-            prices = []
-            volumes = []
-            
-            for _, row in df.iterrows():
-                times.append(row['时间'])
-                prices.append(float(row['价格']))
-                volumes.append(float(row['成交量']) if '成交量' in row else 0)
-            
-            return {
-                "code": etf_code,
-                "times": times,
-                "prices": prices,
-                "volumes": volumes
-            }
-            
-        except Exception as e:
-            logger.error(f"获取 ETF 分时数据失败 {etf_code}: {e}")
-            return None
-    
-    @staticmethod
     async def get_etf_money_flow(etf_code: str, use_cache: bool = True) -> Optional[dict]:
         """获取 ETF 资金流向"""
         # 检查缓存

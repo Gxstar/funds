@@ -123,16 +123,6 @@ class FundDetailService:
         return result
     
     @staticmethod
-    def get_related_index(fund_type: str, fund_name: str = "") -> Optional[Dict]:
-        """根据基金类型/名称获取相关指数信息"""
-        # 优先从基金名称匹配
-        for keyword, index_info in FundDetailService.INDEX_FUND_MAPPING.items():
-            if keyword in fund_name or (fund_type and keyword in fund_type):
-                return index_info
-        
-        return None
-    
-    @staticmethod
     def format_detail_for_ai(detail: Dict) -> str:
         """格式化基金详情用于 AI 分析"""
         if not detail.get("available"):
@@ -155,57 +145,4 @@ class FundDetailService:
                 benchmark = benchmark[:100] + "..."
             lines.append(f"- 业绩基准: {benchmark}")
         
-        return "\n".join(lines)
-
-
-class ValuationService:
-    """估值服务（简化版）"""
-    
-    # 主要指数估值区间参考（历史经验值，实际应从数据源获取）
-    VALUATION_REFERENCE = {
-        "上证指数": {"pe_low": 10, "pe_high": 20, "pe_median": 13},
-        "深证成指": {"pe_low": 15, "pe_high": 35, "pe_median": 22},
-        "创业板指": {"pe_low": 25, "pe_high": 60, "pe_median": 40},
-        "沪深300": {"pe_low": 10, "pe_high": 18, "pe_median": 12},
-        "中证500": {"pe_low": 15, "pe_high": 35, "pe_median": 22},
-        "科创50": {"pe_low": 30, "pe_high": 80, "pe_median": 50},
-    }
-    
-    @staticmethod
-    def estimate_valuation_level(index_name: str, current_change_pct: float) -> Dict:
-        """
-        根据近期涨跌幅估算估值水平（简化方法）
-        实际应用中应该获取真实 PE/PB 数据
-        """
-        # 基于近期涨跌判断大致位置
-        if current_change_pct > 5:
-            level = "偏高"
-            suggestion = "短期涨幅较大，注意回调风险"
-        elif current_change_pct > 2:
-            level = "中等偏上"
-            suggestion = "走势偏强，可继续持有"
-        elif current_change_pct < -5:
-            level = "偏低"
-            suggestion = "短期跌幅较大，可能存在机会"
-        elif current_change_pct < -2:
-            level = "中等偏下"
-            suggestion = "走势偏弱，可考虑逢低布局"
-        else:
-            level = "中等"
-            suggestion = "走势平稳，可维持原策略"
-        
-        return {
-            "index_name": index_name,
-            "estimated_level": level,
-            "suggestion": suggestion,
-            "note": "估值判断基于近期涨跌幅估算，仅供参考"
-        }
-    
-    @staticmethod
-    def format_valuation_for_ai(valuation: Dict) -> str:
-        """格式化估值信息用于 AI 分析"""
-        lines = [f"### 估值参考（{valuation['index_name']}）"]
-        lines.append(f"- 估值水平: {valuation['estimated_level']}")
-        lines.append(f"- 建议: {valuation['suggestion']}")
-        lines.append(f"- 备注: {valuation['note']}")
         return "\n".join(lines)
