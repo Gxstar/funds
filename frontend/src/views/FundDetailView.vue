@@ -62,6 +62,9 @@ const etfForm = ref({
   etf_code: ''
 })
 
+// ETF 刷新状态
+const etfRefreshing = ref(false)
+
 // 推荐 ETF 列表
 const recommendedEtfs = ref([])
 
@@ -354,6 +357,20 @@ function selectRecommendedEtf(code) {
   etfForm.value.etf_code = code
 }
 
+// 刷新 ETF 行情
+async function refreshETF() {
+  if (!fund.value?.related_etf) return
+  etfRefreshing.value = true
+  try {
+    await fundStore.refreshETFData(fund.value.related_etf)
+    ElMessage.success('ETF行情已刷新')
+  } catch (error) {
+    ElMessage.error(error.message || '刷新失败')
+  } finally {
+    etfRefreshing.value = false
+  }
+}
+
 // 渲染 Markdown
 function renderMarkdown(text) {
   if (!text) return ''
@@ -458,7 +475,10 @@ onUnmounted(() => {
         <div class="info-card holding-card">
           <div class="info-header">
             <span class="section-title">ETF 实时行情</span>
-            <span class="text-secondary text-xs">{{ fundStore.etfData?.realtime?.cached_at || '' }}</span>
+            <el-space>
+              <span class="text-secondary text-xs">{{ fundStore.etfData?.realtime?.cached_at || '' }}</span>
+              <el-button size="small" :loading="etfRefreshing" @click="refreshETF">刷新</el-button>
+            </el-space>
           </div>
           <div class="card-content">
             <template v-if="fundStore.etfData?.available">

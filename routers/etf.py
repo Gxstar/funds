@@ -27,9 +27,9 @@ async def get_etf_money_flow(etf_code: str):
 
 
 @router.get("/analysis/{etf_code}")
-async def get_etf_analysis(etf_code: str):
+async def get_etf_analysis(etf_code: str, refresh: bool = Query(False, description="是否强制刷新缓存")):
     """获取 ETF 完整分析数据（实时行情 + 资金流向）"""
-    result = await ETFService.get_etf_analysis_data(etf_code)
+    result = await ETFService.get_etf_analysis_data(etf_code, use_cache=not refresh)
     return result
 
 

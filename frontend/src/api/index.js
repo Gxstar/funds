@@ -117,7 +117,7 @@ export const settingsAPI = {
 export const etfAPI = {
   getRealtime: (code) => request(`${API_BASE}/etf/realtime/${code}`),
   getMoneyFlow: (code) => request(`${API_BASE}/etf/money-flow/${code}`),
-  getAnalysis: (code) => request(`${API_BASE}/etf/analysis/${code}`),
+  getAnalysis: (code, refresh = false) => request(`${API_BASE}/etf/analysis/${code}?refresh=${refresh}`),
   getRecommended: (fundType) => request(`${API_BASE}/etf/recommend/${encodeURIComponent(fundType)}`),
   getFundETF: (fundCode) => request(`${API_BASE}/etf/fund/${fundCode}`),
 }

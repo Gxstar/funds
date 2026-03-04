@@ -128,6 +128,19 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
+  // 刷新 ETF 数据（强制更新缓存）
+  async function refreshETFData(etfCode) {
+    if (!etfCode) {
+      return
+    }
+    try {
+      etfData.value = await etfAPI.getAnalysis(etfCode, true)
+    } catch (error) {
+      console.error('刷新 ETF 数据失败:', error)
+      throw error
+    }
+  }
+
   // 添加基金
   async function addFund(data) {
     try {
@@ -327,6 +340,7 @@ export const useFundStore = defineStore('fund', () => {
     loadTradePreview,
     loadRecentTrades,
     loadETFData,
+    refreshETFData,
     addFund,
     deleteFund,
     searchFunds,
