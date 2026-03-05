@@ -428,14 +428,6 @@ class AIService:
                 logger.error(f"获取 ETF 数据失败: {e}")
                 etf_info = f"关联 ETF {related_etf} 数据获取失败"
         
-        # 获取市场情绪数据
-        try:
-            sentiment_data = await MarketSentimentService.get_market_sentiment()
-            market_sentiment_info = MarketSentimentService.format_sentiment_for_ai(sentiment_data)
-        except Exception as e:
-            logger.warning(f"获取市场情绪失败: {e}")
-            market_sentiment_info = "市场情绪数据暂不可用"
-        
         # 获取基金详情
         try:
             fund_detail = await FundDetailService.get_fund_detail(fund_code)
@@ -443,22 +435,6 @@ class AIService:
         except Exception as e:
             logger.warning(f"获取基金详情失败: {e}")
             fund_detail_info = "基金详情数据暂不可用"
-        
-        # 获取相关新闻
-        try:
-            from services.news_service import NewsService
-            etf_name = None
-            if etf_data and etf_data.get("realtime"):
-                etf_name = etf_data["realtime"].get("name")
-            news_list = await NewsService.get_fund_related_news(
-                fund_type=fund.get("fund_type"),
-                related_etf_name=etf_name,
-                max_news=3
-            )
-            news_info = NewsService.format_news_for_ai(news_list)
-        except Exception as e:
-            logger.warning(f"获取新闻失败: {e}")
-            news_info = "相关新闻暂不可用"
         
         # 获取用户交易历史（近10笔）
         try:
@@ -497,10 +473,8 @@ class AIService:
         
         # 构建提示词
         prompt = user_prompt_template.format(
-            fund_name=fund.get("fund_name", ""),
-            fund_code=fund_code,
-            fund_type=fund.get("fund_type", "未知"),
-            risk_level=fund.get("risk_level", "未知"),
+            time_info=time_data["time_info"],
+            fund_detail=fund_detail_info,
             current_value=values[-1] if values else 0,
             change_5d=round(change_5d, 2),
             change_20d=round(change_20d, 2),
@@ -509,15 +483,11 @@ class AIService:
             ma20=get_latest(indicators.get("ma20", [])),
             rsi=get_latest(indicators.get("rsi", [])),
             macd=get_latest(indicators.get("macd", {}).get("macd", [])),
+            risk_metrics=risk_info,
             etf_info=etf_info,
             holding_info=holding_info,
             position_info=position_info,
-            market_sentiment=market_sentiment_info,
-            fund_detail=fund_detail_info,
-            risk_metrics=risk_info,
-            related_news=news_info,
             trade_history=trade_history,
-            time_info=time_data["time_info"],
             time_based_action=time_data["time_based_action"]
         )
         
@@ -662,30 +632,66 @@ class AIService:
             profit_rate = (profit / total_cost * 100) if total_cost else 0
             ratio_in_portfolio = (market_value / float(total_market_value) * 100) if float(total_market_value) else 0
             
-            # 获取近期涨跌幅
+            # 获取近期涨跌幅和技术指标
             try:
                 chart_data = MarketService.get_chart_data(fund_code, "1m")
                 values = chart_data.get("values", [])
+                indicators = chart_data.get("indicators", {})
                 change_5d = 0
                 change_20d = 0
+                rsi_val = "-"
+                ma5_val = "-"
+                ma20_val = "-"
+                
                 if len(values) >= 5:
                     change_5d = (values[-1] - values[-5]) / values[-5] * 100
                 if len(values) >= 20:
                     change_20d = (values[-1] - values[-20]) / values[-20] * 100
+                
+                # 获取最新技术指标
+                rsi_arr = indicators.get("rsi", [])
+                ma5_arr = indicators.get("ma5", [])
+                ma20_arr = indicators.get("ma20", [])
+                
+                for v in reversed(rsi_arr):
+                    if v is not None:
+                        rsi_val = f"{v:.1f}"
+                        break
+                for v in reversed(ma5_arr):
+                    if v is not None:
+                        ma5_val = f"{v:.4f}"
+                        break
+                for v in reversed(ma20_arr):
+                    if v is not None:
+                        ma20_val = f"{v:.4f}"
+                        break
+                        
             except:
                 change_5d = 0
                 change_20d = 0
+                rsi_val = "-"
+                ma5_val = "-"
+                ma20_val = "-"
+            
+            # 判断技术面状态
+            tech_status = "中性"
+            if rsi_val != "-":
+                rsi_num = float(rsi_val)
+                if rsi_num > 70:
+                    tech_status = "超买"
+                elif rsi_num < 30:
+                    tech_status = "超卖"
+                elif rsi_num > 50:
+                    tech_status = "偏强"
+                else:
+                    tech_status = "偏弱"
             
             holdings_detail_list.append(f"""### {fund_name} ({fund_code})
 - 类型: {fund_type}
-- 持有份额: {shares:.2f}
-- 成本价: {cost_price:.4f}
-- 当前净值: {last_net_value:.4f}
-- 当前市值: ¥{market_value:,.2f}
-- 盈亏: ¥{profit:,.2f} ({profit_rate:.2f}%)
-- 占组合比例: {ratio_in_portfolio:.1f}%
-- 近5日涨跌: {change_5d:.2f}%
-- 近20日涨跌: {change_20d:.2f}%""")
+- 持有份额: {shares:.2f} | 成本价: {cost_price:.4f} | 当前净值: {last_net_value:.4f}
+- 市值: ¥{market_value:,.2f} | 盈亏: ¥{profit:,.2f} ({profit_rate:+.2f}%) | 占比: {ratio_in_portfolio:.1f}%
+- **技术面**: RSI={rsi_val} ({tech_status}) | MA5={ma5_val} | MA20={ma20_val}
+- 近期涨跌: 5日 {change_5d:+.2f}% | 20日 {change_20d:+.2f}%""")
         
         holdings_detail = "\n\n".join(holdings_detail_list)
         
@@ -713,22 +719,6 @@ class AIService:
         except Exception as e:
             logger.warning(f"获取市场情绪失败: {e}")
             market_sentiment = "暂无数据"
-        
-        # 获取相关新闻（综合各板块新闻）
-        from services.news_service import NewsService
-        try:
-            # 获取综合财经新闻
-            all_news = await NewsService.get_fund_related_news(max_news=10)
-            if all_news:
-                news_list = []
-                for news in all_news[:10]:
-                    news_list.append(f"- [{news.get('source', '财经')}] {news.get('title', '')}")
-                related_news = "\n".join(news_list)
-            else:
-                related_news = "暂无相关新闻"
-        except Exception as e:
-            logger.warning(f"获取新闻失败: {e}")
-            related_news = "暂无相关新闻"
         
         # 获取账户交易历史汇总（近20笔）
         try:
@@ -768,15 +758,14 @@ class AIService:
         
         # 构建提示词
         prompt = user_prompt_template.format(
+            time_info=time_data["time_info"],
             market_indices=market_indices,
             market_sentiment=market_sentiment,
             account_summary=account_summary,
             holdings_detail=holdings_detail,
-            related_news=related_news,
             trade_summary=trade_summary,
             available_amount=float(available),
-            time_info=time_data["time_info"],
-            time_based_action=time_data["time_based_action"]
+            position_ratio=position_ratio
         )
         
         try:

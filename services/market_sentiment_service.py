@@ -1,5 +1,5 @@
 """市场情绪服务 - 使用 akshare 获取数据"""
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time, timedelta
 from typing import Optional, Dict
 import logging
 import threading
@@ -13,22 +13,64 @@ REQUEST_TIMEOUT = 15
 MAX_RETRIES = 3
 RETRY_DELAY = 1  # 秒
 
+# A股交易时间段
+MARKET_OPEN_TIME = time(9, 30)
+MARKET_CLOSE_TIME = time(15, 0)
+# 盘中缓存有效期（秒）
+TRADING_CACHE_TTL = 300  # 5分钟
+
 
 class MarketSentimentCache:
-    """市场情绪数据缓存"""
+    """市场情绪数据缓存 - 智能缓存策略"""
     
     def __init__(self):
         self._data: Dict = {}
         self._timestamp: Optional[datetime] = None
         self._lock = threading.Lock()
-        self.CACHE_TTL = 300  # 5 分钟缓存
+    
+    def _is_trading_time(self) -> bool:
+        """判断当前是否在A股交易时间段内"""
+        now = datetime.now()
+        current_time = now.time()
+        weekday = now.weekday()
+        
+        if weekday >= 5:  # 周末
+            return False
+        
+        return MARKET_OPEN_TIME <= current_time <= MARKET_CLOSE_TIME
+    
+    def _is_after_market_close(self) -> bool:
+        """判断当前是否已收盘"""
+        now = datetime.now()
+        current_time = now.time()
+        weekday = now.weekday()
+        
+        if weekday >= 5:
+            return True
+        
+        return current_time >= MARKET_CLOSE_TIME
+    
+    def _get_cache_ttl(self) -> int:
+        """根据时间段动态获取缓存TTL"""
+        if self._is_trading_time():
+            # 交易时间内，短缓存
+            return TRADING_CACHE_TTL
+        elif self._is_after_market_close():
+            # 收盘后，长缓存（到次日开盘）
+            return 3600  # 1小时，实际会在次日开盘时自动失效
+        else:
+            # 开盘前，使用较长缓存
+            return 1800  # 30分钟
     
     def get(self) -> Optional[Dict]:
         with self._lock:
             if not self._data or not self._timestamp:
                 return None
+            
+            ttl = self._get_cache_ttl()
             age = (datetime.now() - self._timestamp).total_seconds()
-            if age < self.CACHE_TTL:
+            
+            if age < ttl:
                 return self._data
             return None
     
@@ -36,6 +78,12 @@ class MarketSentimentCache:
         with self._lock:
             self._data = data
             self._timestamp = datetime.now()
+    
+    def clear(self):
+        """清除缓存"""
+        with self._lock:
+            self._data = {}
+            self._timestamp = None
 
 
 # 全局缓存实例
