@@ -28,6 +28,23 @@ const indicesLoading = ref(false)
 const indicesDate = ref('')
 const indicesIsToday = ref(true)
 
+// 指数选择对话框
+const showIndicesDialog = ref(false)
+const availableIndices = ref([])
+const selectedIndicesCodes = ref([])
+const indicesSaving = ref(false)
+
+// 按类别分组的可选指数
+const groupedIndices = computed(() => {
+  const groups = { 'A股': [], '港股': [], '美股': [] }
+  availableIndices.value.forEach(idx => {
+    if (groups[idx.category]) {
+      groups[idx.category].push(idx)
+    }
+  })
+  return groups
+})
+
 // 仓位信息
 const positionInfo = computed(() => {
   const total = parseFloat(fundStore.aiSettings?.total_position_amount) || 0
@@ -173,6 +190,49 @@ async function loadIndices() {
     console.error('加载市场指数失败:', error)
   } finally {
     indicesLoading.value = false
+  }
+}
+
+// 打开指数选择对话框
+async function openIndicesDialog() {
+  showIndicesDialog.value = true
+  // 加载可选指数和已选择的指数
+  try {
+    const [availableRes, selectedRes] = await Promise.all([
+      marketAPI.getAvailableIndices(),
+      marketAPI.getSelectedIndices()
+    ])
+    availableIndices.value = availableRes.data || []
+    selectedIndicesCodes.value = selectedRes.codes || []
+  } catch (error) {
+    console.error('加载指数配置失败:', error)
+    ElMessage.error('加载指数配置失败')
+  }
+}
+
+// 保存指数选择
+async function saveIndicesSelection() {
+  if (selectedIndicesCodes.value.length === 0) {
+    ElMessage.warning('请至少选择一个指数')
+    return
+  }
+  if (selectedIndicesCodes.value.length > 6) {
+    ElMessage.warning('最多只能选择6个指数')
+    return
+  }
+  
+  indicesSaving.value = true
+  try {
+    await marketAPI.saveSelectedIndices(selectedIndicesCodes.value)
+    ElMessage.success('保存成功')
+    showIndicesDialog.value = false
+    // 重新加载指数数据
+    await loadIndices()
+  } catch (error) {
+    console.error('保存指数选择失败:', error)
+    ElMessage.error('保存失败')
+  } finally {
+    indicesSaving.value = false
   }
 }
 
@@ -330,9 +390,16 @@ onUnmounted(() => {
         <div class="data-card">
           <div class="card-header">
             <span class="title">市场概况</span>
-            <el-tag size="small" :type="indicesIsToday ? 'success' : 'info'" v-if="indicesData.length">
-              {{ indicesIsToday ? '今日' : formatDate(indicesDate) }}
-            </el-tag>
+            <div class="header-actions">
+              <el-tag size="small" :type="indicesIsToday ? 'success' : 'info'" v-if="indicesData.length">
+                {{ indicesIsToday ? '今日' : formatDate(indicesDate) }}
+              </el-tag>
+              <el-tooltip content="选择指数" placement="top">
+                <el-button size="small" circle @click="openIndicesDialog">
+                  <el-icon><Setting /></el-icon>
+                </el-button>
+              </el-tooltip>
+            </div>
           </div>
           <div class="card-body">
             <div class="indices-grid" v-loading="indicesLoading">
@@ -518,6 +585,36 @@ onUnmounted(() => {
           <div class="markdown-body" v-html="renderMarkdown(portfolioAnalysis.analysis)"></div>
         </el-scrollbar>
       </div>
+    </el-dialog>
+
+    <!-- 指数选择对话框 -->
+    <el-dialog v-model="showIndicesDialog" title="选择展示指数" width="500px">
+      <div class="indices-select-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>请选择最多 6 个指数展示在首页市场概况中</span>
+      </div>
+      <div class="indices-select-count">
+        已选择 <strong>{{ selectedIndicesCodes.length }}</strong> / 6 个
+      </div>
+      <el-checkbox-group v-model="selectedIndicesCodes" class="indices-checkbox-group">
+        <div v-for="(indices, category) in groupedIndices" :key="category" class="index-category">
+          <div class="category-title">{{ category }}</div>
+          <div class="category-options">
+            <el-checkbox 
+              v-for="idx in indices" 
+              :key="idx.code" 
+              :label="idx.code"
+              :disabled="selectedIndicesCodes.length >= 6 && !selectedIndicesCodes.includes(idx.code)"
+            >
+              {{ idx.name }}
+            </el-checkbox>
+          </div>
+        </div>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="showIndicesDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveIndicesSelection" :loading="indicesSaving">保存</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -908,5 +1005,62 @@ onUnmounted(() => {
 
 .negative {
   color: #67c23a;
+}
+
+/* 卡片头部操作按钮 */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 指数选择对话框 */
+.indices-select-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #f0f9ff;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #409eff;
+}
+
+.indices-select-count {
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.indices-select-count strong {
+  color: #409eff;
+}
+
+.indices-checkbox-group {
+  width: 100%;
+}
+
+.index-category {
+  margin-bottom: 16px;
+}
+
+.category-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #909399;
+  margin-bottom: 8px;
+  padding-left: 4px;
+  border-left: 3px solid #409eff;
+}
+
+.category-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+.category-options .el-checkbox {
+  margin-right: 0;
 }
 </style>

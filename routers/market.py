@@ -1,6 +1,7 @@
 """行情数据路由"""
 from fastapi import APIRouter, Query
-from typing import Optional
+from fastapi import Body
+from typing import Optional, List
 
 from services.market_service import MarketService
 from services.index_service import IndexService
@@ -13,6 +14,33 @@ async def get_market_indices():
     """获取大盘指数（使用缓存）"""
     result = await IndexService.get_indices(use_cache=True)
     return result
+
+
+@router.get("/indices/available")
+async def get_available_indices():
+    """获取所有可选指数列表"""
+    indices = IndexService.get_available_indices()
+    return {"data": indices}
+
+
+@router.get("/indices/selected")
+async def get_selected_indices():
+    """获取用户选择的指数代码"""
+    codes = IndexService.get_user_selected_indices()
+    return {"codes": codes}
+
+
+@router.post("/indices/selected")
+async def save_selected_indices(codes: List[str] = Body(..., embed=True)):
+    """保存用户选择的指数
+    
+    Args:
+        codes: 最多6个指数代码列表
+    """
+    success = IndexService.save_user_selected_indices(codes)
+    if success:
+        return {"success": True, "codes": IndexService.get_user_selected_indices()}
+    return {"success": False, "error": "保存失败，请检查指数代码是否有效"}
 
 
 @router.post("/sync-all")

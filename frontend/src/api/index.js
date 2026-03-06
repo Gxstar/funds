@@ -75,6 +75,13 @@ export const marketAPI = {
   sync: (code, force = false) => request(`${API_BASE}/market/${code}/sync?force=${force}`, { method: 'POST' }),
   syncAll: () => request(`${API_BASE}/market/sync-all`, { method: 'POST' }),
   getIndices: () => request(`${API_BASE}/market/indices`),
+  // 指数配置相关
+  getAvailableIndices: () => request(`${API_BASE}/market/indices/available`),
+  getSelectedIndices: () => request(`${API_BASE}/market/indices/selected`),
+  saveSelectedIndices: (codes) => request(`${API_BASE}/market/indices/selected`, { 
+    method: 'POST', 
+    body: { codes } 
+  }),
 }
 
 // AI 相关 API

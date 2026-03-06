@@ -20,9 +20,11 @@ ZH_INDEX_CODES = {
     "sh000300": {"name": "沪深300", "sina_code": "sh000300", "category": "A股"},
     "sh000905": {"name": "中证500", "sina_code": "sh000905", "category": "A股"},
     "sh000016": {"name": "上证50", "sina_code": "sh000016", "category": "A股"},
-    "sz399005": {"name": "中小板指", "sina_code": "sz399005", "category": "A股"},
     "sh000852": {"name": "中证1000", "sina_code": "sh000852", "category": "A股"},
     "sz399673": {"name": "创业板50", "sina_code": "sz399673", "category": "A股"},
+    "sh000019": {"name": "上证180", "sina_code": "sh000019", "category": "A股"},
+    "sh000010": {"name": "上证380", "sina_code": "sh000010", "category": "A股"},
+    "sz399005": {"name": "中小板指", "sina_code": "sz399005", "category": "A股"},
 }
 
 # 港股指数 (新浪港股接口)
@@ -30,17 +32,22 @@ HK_INDEX_CODES = {
     "HSI": {"name": "恒生指数", "category": "港股"},
     "HSTECH": {"name": "恒生科技", "category": "港股"},
     "HSCEI": {"name": "国企指数", "category": "港股"},
+    "HSHCI": {"name": "恒生医疗保健", "category": "港股"},
 }
 
-# 美股指数 (新浪美股接口)
+# 美股指数 (新浪美股接口 - 仅支持纳斯达克)
 US_INDEX_CODES = {
     "NASDAQ": {"name": "纳斯达克", "category": "美股"},
-    "DOWJONES": {"name": "道琼斯", "category": "美股"},
-    "SP500": {"name": "标普500", "category": "美股"},
 }
+
+# 合并所有指数，方便查询
+ALL_INDICES = {**ZH_INDEX_CODES, **HK_INDEX_CODES, **US_INDEX_CODES}
 
 # 默认展示的6个指数
 DEFAULT_SELECTED_INDICES = ["sh000001", "sz399001", "sz399006", "sh000688", "HSI", "NASDAQ"]
+
+# 用户指数选择的设置key
+USER_INDICES_SETTING_KEY = "user_selected_indices"
 
 # 港股交易时间段
 HK_MARKET_OPEN_MORNING = time(9, 30)
@@ -57,6 +64,79 @@ TRADING_CACHE_TTL = 300  # 5分钟
 
 class IndexService:
     """大盘指数服务"""
+    
+    @staticmethod
+    def get_available_indices() -> List[Dict]:
+        """获取所有可选指数列表（用于前端选择器）"""
+        indices = []
+        for code, info in ALL_INDICES.items():
+            indices.append({
+                "code": code,
+                "name": info["name"],
+                "category": info["category"]
+            })
+        # 按类别排序：A股 -> 港股 -> 美股
+        category_order = {"A股": 1, "港股": 2, "美股": 3}
+        indices.sort(key=lambda x: (category_order.get(x["category"], 99), x["name"]))
+        return indices
+    
+    @staticmethod
+    def get_user_selected_indices() -> List[str]:
+        """获取用户选择的指数代码列表"""
+        with get_db_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT value FROM settings WHERE key = %s",
+                (USER_INDICES_SETTING_KEY,)
+            )
+            row = cursor.fetchone()
+            
+            if row and row["value"]:
+                try:
+                    data = json.loads(row["value"])
+                    codes = data.get("codes", [])
+                    # 验证选择的指数是否有效
+                    valid_codes = [c for c in codes if c in ALL_INDICES]
+                    # 如果有有效选择，返回它们（即使有些被过滤掉了）
+                    if valid_codes:
+                        return valid_codes
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            
+            # 返回默认选择
+            return DEFAULT_SELECTED_INDICES
+    
+    @staticmethod
+    def save_user_selected_indices(codes: List[str]) -> bool:
+        """保存用户选择的指数
+        
+        Args:
+            codes: 最多6个指数代码列表
+            
+        Returns:
+            是否保存成功
+        """
+        # 验证数量
+        if len(codes) > 6:
+            codes = codes[:6]
+        
+        # 验证有效性
+        valid_codes = [c for c in codes if c in ALL_INDICES]
+        if not valid_codes:
+            return False
+        
+        with get_db_context() as conn:
+            cursor = conn.cursor()
+            data = {"codes": valid_codes}
+            cursor.execute("""
+                INSERT INTO settings (key, value, updated_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (key) DO UPDATE SET
+                    value = EXCLUDED.value,
+                    updated_at = EXCLUDED.updated_at
+            """, (USER_INDICES_SETTING_KEY, json.dumps(data, ensure_ascii=False), datetime.now()))
+        
+        return True
     
     @staticmethod
     def get_cached_indices() -> Optional[Dict]:
@@ -91,30 +171,81 @@ class IndexService:
             """, (json.dumps(data, ensure_ascii=False), datetime.now()))
     
     @staticmethod
-    async def fetch_indices_from_sina() -> List[Dict]:
+    async def fetch_indices_from_sina(selected_codes: List[str] = None) -> List[Dict]:
         """从新浪接口获取大盘指数最新数据
         
-        交易时间内使用实时行情接口，非交易时间使用日线数据
+        Args:
+            selected_codes: 用户选择的指数代码列表，如果为空则使用用户保存的配置或默认值
+            
+        Returns:
+            指数数据列表
         """
         try:
             import akshare as ak
+            
+            # 确定要获取的指数
+            if selected_codes is None:
+                selected_codes = IndexService.get_user_selected_indices()
+            
+            # 过滤出各类指数
+            zh_codes = [c for c in selected_codes if c in ZH_INDEX_CODES]
+            hk_codes = [c for c in selected_codes if c in HK_INDEX_CODES]
+            us_codes = [c for c in selected_codes if c in US_INDEX_CODES]
             
             indices = []
             today = date.today()
             is_trading = IndexService._is_trading_time()
             
             # 1. 获取A股指数
-            if is_trading:
-                # 交易时间内：使用实时行情接口
+            if zh_codes:
+                if is_trading:
+                    # 交易时间内：使用实时行情接口
+                    try:
+                        akshare_limiter.acquire()
+                        df = ak.stock_zh_index_spot_sina()
+                        
+                        if df is not None and not df.empty:
+                            for code in zh_codes:
+                                info = ZH_INDEX_CODES[code]
+                                # 查找对应指数（使用中文列名）
+                                mask = df['代码'] == info["sina_code"]
+                                result = df[mask]
+                                
+                                if not result.empty:
+                                    row = result.iloc[0]
+                                    price = float(row['最新价'])
+                                    change = float(row['涨跌额'])
+                                    change_pct = float(row['涨跌幅'])
+                                    
+                                    indices.append({
+                                        "code": code,
+                                        "name": info["name"],
+                                        "price": round(price, 2),
+                                        "change": round(change, 2),
+                                        "change_pct": round(change_pct, 2),
+                                        "date": str(today),
+                                    })
+                    except Exception as e:
+                        logger.warning(f"获取A股实时指数失败: {e}，尝试使用日线数据")
+                        # 降级到日线数据
+                        zh_indices = await IndexService._fetch_selected_indices_daily(zh_codes)
+                        indices.extend(zh_indices)
+                else:
+                    # 非交易时间：使用日线数据
+                    zh_indices = await IndexService._fetch_selected_indices_daily(zh_codes)
+                    indices.extend(zh_indices)
+            
+            # 2. 获取港股指数（使用实时行情接口）
+            if hk_codes:
                 try:
                     akshare_limiter.acquire()
-                    df = ak.stock_zh_index_spot_sina()
+                    hk_df = ak.stock_hk_index_spot_sina()
                     
-                    if df is not None and not df.empty:
-                        for code, info in ZH_INDEX_CODES.items():
-                            # 查找对应指数（使用中文列名）
-                            mask = df['代码'] == info["sina_code"]
-                            result = df[mask]
+                    if hk_df is not None and not hk_df.empty:
+                        for code in hk_codes:
+                            info = HK_INDEX_CODES[code]
+                            mask = hk_df['代码'] == code
+                            result = hk_df[mask]
                             
                             if not result.empty:
                                 row = result.iloc[0]
@@ -130,70 +261,44 @@ class IndexService:
                                     "change_pct": round(change_pct, 2),
                                     "date": str(today),
                                 })
+                            else:
+                                logger.warning(f"港股指数 {code} 未找到")
                 except Exception as e:
-                    logger.warning(f"获取A股实时指数失败: {e}，尝试使用日线数据")
-                    # 降级到日线数据
-                    indices = await IndexService._fetch_indices_daily()
-                    if indices:
-                        return indices
-            else:
-                # 非交易时间：使用日线数据
-                zh_indices = await IndexService._fetch_indices_daily()
-                indices.extend(zh_indices)
+                    logger.warning(f"获取港股指数失败: {e}")
             
-            # 2. 获取港股指数（使用实时行情接口）
-            try:
-                akshare_limiter.acquire()
-                hk_df = ak.stock_hk_index_spot_sina()
-                
-                if hk_df is not None and not hk_df.empty:
-                    for code, info in HK_INDEX_CODES.items():
-                        mask = hk_df['代码'] == code
-                        result = hk_df[mask]
+            # 3. 获取美股指数（纳斯达克）
+            if us_codes:
+                try:
+                    akshare_limiter.acquire()
+                    df = ak.index_us_stock_sina()
+                    
+                    if df is not None and not df.empty:
+                        # index_us_stock_sina 返回纳斯达克历史数据
+                        # 使用最后一行作为最新数据
+                        last_row = df.iloc[-1]
+                        prev_row = df.iloc[-2] if len(df) > 1 else last_row
                         
-                        if not result.empty:
-                            row = result.iloc[0]
-                            price = float(row['最新价'])
-                            change = float(row['涨跌额'])
-                            change_pct = float(row['涨跌幅'])
-                            
+                        last_close = float(last_row["close"])
+                        prev_close = float(prev_row["close"])
+                        change = last_close - prev_close
+                        change_pct = (change / prev_close * 100) if prev_close != 0 else 0
+                        
+                        # 只添加 NASDAQ（akshare 只支持纳斯达克）
+                        if "NASDAQ" in us_codes:
                             indices.append({
-                                "code": code,
-                                "name": info["name"],
-                                "price": round(price, 2),
+                                "code": "NASDAQ",
+                                "name": "纳斯达克",
+                                "price": round(last_close, 2),
                                 "change": round(change, 2),
                                 "change_pct": round(change_pct, 2),
-                                "date": str(today),
+                                "date": str(last_row["date"]),
                             })
-                        else:
-                            logger.warning(f"港股指数 {code} 未找到")
-            except Exception as e:
-                logger.warning(f"获取港股指数失败: {e}")
+                except Exception as e:
+                    logger.warning(f"获取美股指数失败: {e}")
             
-            # 3. 获取美股指数 (纳斯达克)
-            try:
-                akshare_limiter.acquire()
-                df = ak.index_us_stock_sina()
-                
-                if df is not None and not df.empty:
-                    last_row = df.iloc[-1]
-                    prev_row = df.iloc[-2] if len(df) > 1 else last_row
-                    
-                    last_close = float(last_row["close"])
-                    prev_close = float(prev_row["close"])
-                    change = last_close - prev_close
-                    change_pct = (change / prev_close * 100) if prev_close != 0 else 0
-                    
-                    indices.append({
-                        "code": "NASDAQ",
-                        "name": "纳斯达克",
-                        "price": round(last_close, 2),
-                        "change": round(change, 2),
-                        "change_pct": round(change_pct, 2),
-                        "date": str(last_row["date"]),
-                    })
-            except Exception as e:
-                logger.warning(f"获取 美股指数失败: {e}")
+            # 按用户选择的顺序排序返回
+            code_order = {code: i for i, code in enumerate(selected_codes)}
+            indices.sort(key=lambda x: code_order.get(x["code"], 999))
             
             return indices
         except Exception as e:
@@ -201,12 +306,15 @@ class IndexService:
             return []
     
     @staticmethod
-    async def _fetch_indices_daily() -> List[Dict]:
-        """获取A股指数日线数据（非交易时间使用）"""
+    async def _fetch_selected_indices_daily(selected_codes: List[str]) -> List[Dict]:
+        """获取指定A股指数的日线数据（非交易时间使用）"""
         import akshare as ak
         
         indices = []
-        for code, info in ZH_INDEX_CODES.items():
+        for code in selected_codes:
+            if code not in ZH_INDEX_CODES:
+                continue
+            info = ZH_INDEX_CODES[code]
             try:
                 akshare_limiter.acquire()
                 df = ak.stock_zh_index_daily(symbol=info["sina_code"])
@@ -385,47 +493,56 @@ class IndexService:
         2. 交易日盘后：当日数据一直有效
         3. 非交易日：最近交易日数据有效
         """
+        # 获取用户选择的指数代码
+        selected_codes = IndexService.get_user_selected_indices()
+        
         # 获取缓存数据
         cached = IndexService.get_cached_indices()
         
         # 如果使用缓存，检查缓存有效性
         if use_cache and cached:
-            is_valid, reason = IndexService._get_cache_validity(cached)
-            
-            if is_valid:
-                cached_date_str = cached.get("date", "")
-                cached_date_only = None
-                try:
-                    if "T" in cached_date_str:
-                        cached_date_only = datetime.fromisoformat(cached_date_str).date()
-                    else:
-                        cached_date_only = datetime.strptime(cached_date_str, "%Y-%m-%d").date()
-                except:
-                    pass
-                
-                today = date.today()
-                is_today = cached_date_only == today if cached_date_only else False
-                
-                logger.debug(f"使用缓存数据: reason={reason}, date={cached_date_str}")
-                return {
-                    "data": cached["indices"],
-                    "cached": True,
-                    "is_today": is_today,
-                    "date": cached_date_str,
-                    "cache_reason": reason
-                }
+            # 检查缓存的指数选择是否与当前选择一致
+            cached_codes = cached.get("selected_codes", [])
+            if set(cached_codes) != set(selected_codes):
+                logger.debug("用户选择的指数已变化，需要重新获取")
             else:
-                logger.debug(f"缓存已过期: reason={reason}")
+                is_valid, reason = IndexService._get_cache_validity(cached)
+                
+                if is_valid:
+                    cached_date_str = cached.get("date", "")
+                    cached_date_only = None
+                    try:
+                        if "T" in cached_date_str:
+                            cached_date_only = datetime.fromisoformat(cached_date_str).date()
+                        else:
+                            cached_date_only = datetime.strptime(cached_date_str, "%Y-%m-%d").date()
+                    except:
+                        pass
+                    
+                    today = date.today()
+                    is_today = cached_date_only == today if cached_date_only else False
+                    
+                    logger.debug(f"使用缓存数据: reason={reason}, date={cached_date_str}")
+                    return {
+                        "data": cached["indices"],
+                        "cached": True,
+                        "is_today": is_today,
+                        "date": cached_date_str,
+                        "cache_reason": reason
+                    }
+                else:
+                    logger.debug(f"缓存已过期: reason={reason}")
         
         # 尝试获取新数据
-        indices = await IndexService.fetch_indices_from_sina()
+        indices = await IndexService.fetch_indices_from_sina(selected_codes)
         
         if indices:
             # 使用指数数据中的日期
             data_date = indices[0].get("date") if indices else None
             cache_data = {
                 "indices": indices,
-                "date": data_date or datetime.now().isoformat()
+                "date": data_date or datetime.now().isoformat(),
+                "selected_codes": selected_codes  # 保存用户选择
             }
             IndexService.save_indices_to_cache(cache_data)
             
