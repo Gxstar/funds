@@ -10,23 +10,43 @@ from utils.rate_limiter import akshare_limiter
 
 logger = logging.getLogger(__name__)
 
+# 所有可选指数定义 (用户可从中选择6个展示)
 # A股指数 (新浪接口)
 ZH_INDEX_CODES = {
-    "sh000001": {"name": "上证指数", "sina_code": "sh000001"},
-    "sz399001": {"name": "深证成指", "sina_code": "sz399001"}, 
-    "sz399006": {"name": "创业板指", "sina_code": "sz399006"},
-    "sh000688": {"name": "科创板指", "sina_code": "sh000688"},
+    "sh000001": {"name": "上证指数", "sina_code": "sh000001", "category": "A股"},
+    "sz399001": {"name": "深证成指", "sina_code": "sz399001", "category": "A股"}, 
+    "sz399006": {"name": "创业板指", "sina_code": "sz399006", "category": "A股"},
+    "sh000688": {"name": "科创50", "sina_code": "sh000688", "category": "A股"},
+    "sh000300": {"name": "沪深300", "sina_code": "sh000300", "category": "A股"},
+    "sh000905": {"name": "中证500", "sina_code": "sh000905", "category": "A股"},
+    "sh000016": {"name": "上证50", "sina_code": "sh000016", "category": "A股"},
+    "sz399005": {"name": "中小板指", "sina_code": "sz399005", "category": "A股"},
+    "sh000852": {"name": "中证1000", "sina_code": "sh000852", "category": "A股"},
+    "sz399673": {"name": "创业板50", "sina_code": "sz399673", "category": "A股"},
 }
 
 # 港股指数 (新浪港股接口)
 HK_INDEX_CODES = {
-    "HSTECH": {"name": "恒生科技"},
+    "HSI": {"name": "恒生指数", "category": "港股"},
+    "HSTECH": {"name": "恒生科技", "category": "港股"},
+    "HSCEI": {"name": "国企指数", "category": "港股"},
 }
 
-# 美股指数 (新浪美股接口，直接返回纳斯达克)
+# 美股指数 (新浪美股接口)
 US_INDEX_CODES = {
-    "NASDAQ": {"name": "纳斯达克"},
+    "NASDAQ": {"name": "纳斯达克", "category": "美股"},
+    "DOWJONES": {"name": "道琼斯", "category": "美股"},
+    "SP500": {"name": "标普500", "category": "美股"},
 }
+
+# 默认展示的6个指数
+DEFAULT_SELECTED_INDICES = ["sh000001", "sz399001", "sz399006", "sh000688", "HSI", "NASDAQ"]
+
+# 港股交易时间段
+HK_MARKET_OPEN_MORNING = time(9, 30)
+HK_MARKET_CLOSE_MORNING = time(12, 0)
+HK_MARKET_OPEN_AFTERNOON = time(13, 0)
+HK_MARKET_CLOSE_AFTERNOON = time(16, 0)
 
 # A股交易时间段
 MARKET_OPEN_TIME = time(9, 30)
@@ -118,36 +138,37 @@ class IndexService:
                         return indices
             else:
                 # 非交易时间：使用日线数据
-                indices = await IndexService._fetch_indices_daily()
-                if indices:
-                    return indices
+                zh_indices = await IndexService._fetch_indices_daily()
+                indices.extend(zh_indices)
             
-            # 2. 获取港股指数（使用日线数据，港股交易时间不同）
-            for code, info in HK_INDEX_CODES.items():
-                try:
-                    akshare_limiter.acquire()
-                    df = ak.stock_hk_index_daily_sina(symbol=code)
-                    
-                    if df is not None and not df.empty:
-                        last_row = df.iloc[-1]
-                        prev_row = df.iloc[-2] if len(df) > 1 else last_row
+            # 2. 获取港股指数（使用实时行情接口）
+            try:
+                akshare_limiter.acquire()
+                hk_df = ak.stock_hk_index_spot_sina()
+                
+                if hk_df is not None and not hk_df.empty:
+                    for code, info in HK_INDEX_CODES.items():
+                        mask = hk_df['代码'] == code
+                        result = hk_df[mask]
                         
-                        last_close = float(last_row["close"])
-                        prev_close = float(prev_row["close"])
-                        change = last_close - prev_close
-                        change_pct = (change / prev_close * 100) if prev_close != 0 else 0
-                        
-                        indices.append({
-                            "code": code,
-                            "name": info["name"],
-                            "price": round(last_close, 2),
-                            "change": round(change, 2),
-                            "change_pct": round(change_pct, 2),
-                            "date": str(last_row["date"]),
-                        })
-                except Exception as e:
-                    logger.warning(f"获取 港股指数 {code} 失败: {e}")
-                    continue
+                        if not result.empty:
+                            row = result.iloc[0]
+                            price = float(row['最新价'])
+                            change = float(row['涨跌额'])
+                            change_pct = float(row['涨跌幅'])
+                            
+                            indices.append({
+                                "code": code,
+                                "name": info["name"],
+                                "price": round(price, 2),
+                                "change": round(change, 2),
+                                "change_pct": round(change_pct, 2),
+                                "date": str(today),
+                            })
+                        else:
+                            logger.warning(f"港股指数 {code} 未找到")
+            except Exception as e:
+                logger.warning(f"获取港股指数失败: {e}")
             
             # 3. 获取美股指数 (纳斯达克)
             try:

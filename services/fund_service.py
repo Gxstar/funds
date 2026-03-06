@@ -124,18 +124,29 @@ class FundService:
             total_cost = Decimal(str(summary_row["total_cost"] or 0))
             fund_count = summary_row["fund_count"]
             
-            # 计算当前市值（需要最新净值）
+            # 计算当前市值和当日收益（需要最新净值和涨跌幅）
             cursor.execute("""
-                SELECT h.fund_code, h.total_shares, h.total_cost, f.last_net_value
+                SELECT h.fund_code, h.total_shares, h.total_cost, 
+                       f.last_net_value, f.last_growth_rate, f.last_price_date
                 FROM holdings h
                 LEFT JOIN funds f ON h.fund_code = f.fund_code
             """)
             
             total_market_value = Decimal("0")
+            today_profit = Decimal("0")
+            
             for row in cursor.fetchall():
                 shares = Decimal(str(row["total_shares"]))
                 net_value = Decimal(str(row["last_net_value"])) if row["last_net_value"] else Decimal("0")
-                total_market_value += shares * net_value
+                growth_rate = Decimal(str(row["last_growth_rate"])) if row["last_growth_rate"] else Decimal("0")
+                
+                # 当前市值
+                market_value = shares * net_value
+                total_market_value += market_value
+                
+                # 当日收益 = 市值 × 涨跌幅 / 100
+                # 注意：这是近似计算，对于小幅波动准确
+                today_profit += market_value * growth_rate / 100
             
             total_profit = total_market_value - total_cost
             profit_rate = (total_profit / total_cost * 100) if total_cost else Decimal("0")
@@ -145,6 +156,7 @@ class FundService:
                 "total_market_value": total_market_value,
                 "total_profit": total_profit,
                 "profit_rate": profit_rate,
+                "today_profit": today_profit,
                 "fund_count": fund_count
             }
     
@@ -265,23 +277,32 @@ class FundService:
                             VALUES (%s, %s, %s, %s)
                         """, (fund_code, float(actual_shares), float(cost_price), float(amount)))
                 elif trade_type == "SELL":
-                    if existing:
-                        current_shares = Decimal(str(existing["total_shares"]))
-                        current_cost = Decimal(str(existing["total_cost"]))
-                        if current_shares > 0:
-                            cost_per_share = current_cost / current_shares
-                            new_shares = current_shares - actual_shares
-                            new_cost = current_cost - (cost_per_share * actual_shares)
-                            if new_shares > 0:
-                                new_cost_price = new_cost / new_shares
-                                cursor.execute("""
-                                    UPDATE holdings 
-                                    SET total_shares = %s, cost_price = %s, total_cost = %s, updated_at = %s
-                                    WHERE fund_code = %s
-                                """, (float(new_shares), float(new_cost_price), float(new_cost), datetime.now(), fund_code))
-                            else:
-                                # 卖光所有份额，删除持仓
-                                cursor.execute("DELETE FROM holdings WHERE fund_code = %s", (fund_code,))
+                    # 卖出验证：检查是否有足够份额
+                    if not existing:
+                        # 删除刚插入的交易记录
+                        cursor.execute("DELETE FROM trades WHERE id = %s", (trade_id,))
+                        raise ValueError(f"无法卖出：当前未持有该基金")
+                    
+                    current_shares = Decimal(str(existing["total_shares"]))
+                    if current_shares < actual_shares:
+                        # 删除刚插入的交易记录
+                        cursor.execute("DELETE FROM trades WHERE id = %s", (trade_id,))
+                        raise ValueError(f"份额不足：当前持有 {current_shares:.2f} 份，尝试卖出 {actual_shares:.2f} 份")
+                    
+                    current_cost = Decimal(str(existing["total_cost"]))
+                    cost_per_share = current_cost / current_shares
+                    new_shares = current_shares - actual_shares
+                    new_cost = current_cost - (cost_per_share * actual_shares)
+                    if new_shares > 0:
+                        new_cost_price = new_cost / new_shares
+                        cursor.execute("""
+                            UPDATE holdings 
+                            SET total_shares = %s, cost_price = %s, total_cost = %s, updated_at = %s
+                            WHERE fund_code = %s
+                        """, (float(new_shares), float(new_cost_price), float(new_cost), datetime.now(), fund_code))
+                    else:
+                        # 卖光所有份额，删除持仓
+                        cursor.execute("DELETE FROM holdings WHERE fund_code = %s", (fund_code,))
             
             return {
                 "id": trade_id,

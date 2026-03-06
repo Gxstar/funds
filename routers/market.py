@@ -15,7 +15,7 @@ async def get_market_indices():
     return result
 
 
-@router.get("/sync-all")
+@router.post("/sync-all")
 async def sync_all_funds():
     """同步所有基金数据"""
     from services.sync_scheduler import scheduler

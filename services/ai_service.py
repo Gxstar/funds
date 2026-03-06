@@ -51,8 +51,14 @@ class AICache:
     """AI 分析缓存管理"""
     
     @staticmethod
-    def get_cache(fund_code: str, analysis_type: str = "fund") -> Optional[dict]:
-        """获取缓存的分析结果"""
+    def get_cache(fund_code: str, analysis_type: str = "fund", max_age_hours: int = 24) -> Optional[dict]:
+        """获取缓存的分析结果
+        
+        Args:
+            fund_code: 基金代码
+            analysis_type: 分析类型
+            max_age_hours: 缓存最大有效期（小时），默认 24 小时
+        """
         try:
             with get_db_context() as conn:
                 cursor = conn.cursor()
@@ -66,13 +72,23 @@ class AICache:
                 if not row:
                     return None
                 
+                # 检查缓存是否过期
+                created_at = row.get("created_at")
+                age = None
+                if created_at:
+                    age = datetime.now() - created_at
+                    if max_age_hours > 0 and age > timedelta(hours=max_age_hours):
+                        logger.info(f"AI缓存已过期: {fund_code}, 年龄: {age}")
+                        return None
+                
                 return {
                     "id": row.get("id"),
                     "analysis": row.get("analysis"),
                     "indicators": row.get("indicators"),
                     "risk_metrics": row.get("risk_metrics"),
-                    "timestamp": row.get("created_at").isoformat() if row.get("created_at") else None,
-                    "cached": True
+                    "timestamp": created_at.isoformat() if created_at else None,
+                    "cached": True,
+                    "age_hours": age.total_seconds() / 3600 if age else None
                 }
         except Exception as e:
             logger.error(f"获取AI缓存失败: {e}")
@@ -394,47 +410,61 @@ class AIService:
         else:
             position_info = "未设置满仓金额（可在设置中配置）"
         
-        # 获取关联 ETF 数据
-        etf_info = "暂无关联 ETF"
-        etf_data = None
+        # 并发获取 ETF 数据和基金详情（提升性能）
         related_etf = fund.get("related_etf")
         
-        if related_etf:
+        async def fetch_etf_data():
+            """获取 ETF 数据"""
+            if not related_etf:
+                return None
             try:
                 from services.etf_service import ETFService
-                etf_data = await ETFService.get_etf_analysis_data(related_etf)
-                
-                if etf_data and etf_data.get("available"):
-                    realtime = etf_data.get("realtime", {})
-                    money_flow = etf_data.get("money_flow", {})
-                    
-                    etf_info = f"""- 关联 ETF: {related_etf} ({realtime.get('name', '-')})
+                return await ETFService.get_etf_analysis_data(related_etf)
+            except Exception as e:
+                logger.error(f"获取 ETF 数据失败: {e}")
+                return None
+        
+        async def fetch_fund_detail():
+            """获取基金详情"""
+            try:
+                return await FundDetailService.get_fund_detail(fund_code)
+            except Exception as e:
+                logger.warning(f"获取基金详情失败: {e}")
+                return None
+        
+        # 并发执行
+        etf_data, fund_detail = await asyncio.gather(
+            fetch_etf_data(),
+            fetch_fund_detail()
+        )
+        
+        # 处理 ETF 数据
+        etf_info = "暂无关联 ETF"
+        if etf_data and etf_data.get("available"):
+            realtime = etf_data.get("realtime", {})
+            money_flow = etf_data.get("money_flow", {})
+            
+            etf_info = f"""- 关联 ETF: {related_etf} ({realtime.get('name', '-')})
 - 当日价格: {realtime.get('current_price', '-')}
 - 当日涨跌幅: {realtime.get('change_pct', 0):.2f}%
 - 今开: {realtime.get('open', '-')} | 最高: {realtime.get('high', '-')} | 最低: {realtime.get('low', '-')}
 - 昨收: {realtime.get('pre_close', '-')}"""
-                    
-                    if money_flow:
-                        main_inflow = money_flow.get('main_net_inflow', 0)
-                        main_inflow_pct = money_flow.get('main_net_inflow_pct', 0)
-                        etf_info += f"""
+            
+            if money_flow:
+                main_inflow = money_flow.get('main_net_inflow', 0)
+                main_inflow_pct = money_flow.get('main_net_inflow_pct', 0)
+                etf_info += f"""
 - 主力净流入: {main_inflow:,.0f} 元 ({main_inflow_pct:.2f}%)"""
-                    
-                    if realtime.get('is_trading'):
-                        etf_info += "\n- 状态: 交易中（实时数据）"
-                    else:
-                        etf_info += "\n- 状态: 非交易时间（最近收盘数据）"
-            except Exception as e:
-                logger.error(f"获取 ETF 数据失败: {e}")
-                etf_info = f"关联 ETF {related_etf} 数据获取失败"
+            
+            if realtime.get('is_trading'):
+                etf_info += "\n- 状态: 交易中（实时数据）"
+            else:
+                etf_info += "\n- 状态: 非交易时间（最近收盘数据）"
+        elif related_etf and not etf_data:
+            etf_info = f"关联 ETF {related_etf} 数据获取失败"
         
-        # 获取基金详情
-        try:
-            fund_detail = await FundDetailService.get_fund_detail(fund_code)
-            fund_detail_info = FundDetailService.format_detail_for_ai(fund_detail)
-        except Exception as e:
-            logger.warning(f"获取基金详情失败: {e}")
-            fund_detail_info = "基金详情数据暂不可用"
+        # 处理基金详情
+        fund_detail_info = FundDetailService.format_detail_for_ai(fund_detail) if fund_detail else "基金详情数据暂不可用"
         
         # 获取用户交易历史（近10笔）
         try:

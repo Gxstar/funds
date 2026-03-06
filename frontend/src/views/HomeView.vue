@@ -1,9 +1,10 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useFundStore } from '@/stores/funds'
 import { aiAPI, marketAPI } from '@/api'
+import { formatCurrency, formatPercent, formatDate, formatDateTime } from '@/utils/format'
 import * as echarts from 'echarts'
 import { marked } from 'marked'
 
@@ -26,18 +27,6 @@ const indicesData = ref([])
 const indicesLoading = ref(false)
 const indicesDate = ref('')
 const indicesIsToday = ref(true)
-
-// 格式化
-function formatCurrency(value) {
-  if (value === null || value === undefined) return '¥0.00'
-  return '¥' + parseFloat(value).toLocaleString('zh-CN', { minimumFractionDigits: 2 })
-}
-
-function formatPercent(value) {
-  if (value === null || value === undefined) return '0.00%'
-  const num = parseFloat(value)
-  return (num > 0 ? '+' : '') + num.toFixed(2) + '%'
-}
 
 // 仓位信息
 const positionInfo = computed(() => {
@@ -187,27 +176,6 @@ async function loadIndices() {
   }
 }
 
-// 格式化指数日期显示
-function formatIndicesDate(dateStr) {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  const month = d.getMonth() + 1
-  const day = d.getDate()
-  return `${month}月${day}日`
-}
-
-// 格式化分析时间显示
-function formatAnalysisTime(dateStr) {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  const year = d.getFullYear()
-  const month = d.getMonth() + 1
-  const day = d.getDate()
-  const hour = d.getHours().toString().padStart(2, '0')
-  const minute = d.getMinutes().toString().padStart(2, '0')
-  return `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')} ${hour}:${minute}`
-}
-
 // AI 持仓分析 - 加载缓存（优先展示缓存，没有缓存不弹窗）
 async function loadPortfolioAnalysis() {
   portfolioLoading.value = true
@@ -308,8 +276,20 @@ onUnmounted(() => {
         </div>
       </div>
       
-      <div class="stat-card highlight" :class="{ profit: fundStore.holdingsSummary.total_profit > 0, loss: fundStore.holdingsSummary.total_profit < 0 }">
+      <div class="stat-card highlight" :class="{ profit: fundStore.holdingsSummary.today_profit > 0, loss: fundStore.holdingsSummary.today_profit < 0 }">
         <div class="stat-icon">
+          <el-icon><Sunrise /></el-icon>
+        </div>
+        <div class="stat-content">
+          <div class="stat-label">当日收益</div>
+          <div class="stat-value">
+            {{ (fundStore.holdingsSummary.today_profit > 0 ? '+' : '') + formatCurrency(fundStore.holdingsSummary.today_profit).slice(1) }}
+          </div>
+        </div>
+      </div>
+      
+      <div class="stat-card" :class="{ profit: fundStore.holdingsSummary.total_profit > 0, loss: fundStore.holdingsSummary.total_profit < 0 }">
+        <div class="stat-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
           <el-icon><DataLine /></el-icon>
         </div>
         <div class="stat-content">
@@ -322,7 +302,7 @@ onUnmounted(() => {
       </div>
       
       <div class="stat-card">
-        <div class="stat-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+        <div class="stat-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
           <el-icon><PieChart /></el-icon>
         </div>
         <div class="stat-content">
@@ -351,7 +331,7 @@ onUnmounted(() => {
           <div class="card-header">
             <span class="title">市场概况</span>
             <el-tag size="small" :type="indicesIsToday ? 'success' : 'info'" v-if="indicesData.length">
-              {{ indicesIsToday ? '今日' : formatIndicesDate(indicesDate) }}
+              {{ indicesIsToday ? '今日' : formatDate(indicesDate) }}
             </el-tag>
           </div>
           <div class="card-body">
@@ -423,7 +403,10 @@ onUnmounted(() => {
                 >
                   <div class="item-left">
                     <span class="name">{{ fund.fund_name }}</span>
-                    <span class="code">{{ fund.fund_code }}</span>
+                    <div class="meta-row">
+                      <span class="code">{{ fund.fund_code }}</span>
+                      <span v-if="fund.last_price_date" class="price-date">{{ fund.last_price_date }}</span>
+                    </div>
                   </div>
                   <div class="item-right">
                     <div class="market-value">{{ formatCurrency(parseFloat(fund.total_shares) * parseFloat(fund.last_net_value || 0)) }}</div>
@@ -488,7 +471,7 @@ onUnmounted(() => {
         <div class="analysis-header">
           <div class="analysis-time">
             <el-icon><Clock /></el-icon>
-            <span>分析时间：{{ formatAnalysisTime(portfolioAnalysis.timestamp) }}</span>
+            <span>分析时间：{{ formatDateTime(portfolioAnalysis.timestamp) }}</span>
           </div>
           <div class="analysis-actions">
             <el-tag v-if="portfolioAnalysis.cached" type="warning" size="small">缓存</el-tag>
@@ -548,7 +531,7 @@ onUnmounted(() => {
 /* 统计卡片 */
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 16px;
   margin-bottom: 20px;
 }
@@ -780,9 +763,23 @@ onUnmounted(() => {
   color: #1a1a2e;
 }
 
+.item-left .meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .item-left .code {
   font-size: 12px;
   color: #909399;
+}
+
+.item-left .price-date {
+  font-size: 11px;
+  color: #c0c4cc;
+  background: #f5f7fa;
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 .item-right {

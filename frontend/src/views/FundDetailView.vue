@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useFundStore } from '@/stores/funds'
 import { etfAPI, tradeAPI } from '@/api'
+import { formatCurrency, formatPercent } from '@/utils/format'
 import * as echarts from 'echarts'
 import { marked } from 'marked'
 
@@ -70,18 +71,6 @@ const recommendedEtfs = ref([])
 
 // 当前基金
 const fund = computed(() => fundStore.currentFund)
-
-// 格式化
-function formatCurrency(value) {
-  if (value === null || value === undefined) return '¥0.00'
-  return '¥' + parseFloat(value).toLocaleString('zh-CN', { minimumFractionDigits: 2 })
-}
-
-function formatPercent(value) {
-  if (value === null || value === undefined) return '0.00%'
-  const num = parseFloat(value)
-  return (num > 0 ? '+' : '') + num.toFixed(2) + '%'
-}
 
 // 持仓信息计算
 const holdingInfo = computed(() => {

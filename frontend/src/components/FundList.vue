@@ -1,8 +1,8 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useFundStore } from '@/stores/funds'
-import { fundAPI } from '@/api'
+import { formatCurrency, formatPercent } from '@/utils/format'
 
 const router = useRouter()
 const fundStore = useFundStore()
@@ -10,21 +10,6 @@ const fundStore = useFundStore()
 const searchKeyword = ref('')
 const searchResults = ref([])
 const searching = ref(false)
-
-// 格式化货币
-function formatCurrency(value) {
-  if (value === null || value === undefined) return '¥0.00'
-  const num = parseFloat(value)
-  return '¥' + Math.abs(num).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-// 格式化百分比
-function formatPercent(value) {
-  if (value === null || value === undefined) return '0.00%'
-  const num = parseFloat(value)
-  const sign = num > 0 ? '+' : ''
-  return sign + num.toFixed(2) + '%'
-}
 
 // 搜索基金
 let searchTimeout
@@ -88,6 +73,18 @@ function selectFund(fund) {
               {{ formatCurrency(fundStore.holdingsSummary.total_profit) }}
             </span>
           </div>
+          <div class="summary-item">
+            <span class="label">当日收益</span>
+            <span class="value" :class="{ profit: fundStore.holdingsSummary.today_profit > 0, loss: fundStore.holdingsSummary.today_profit < 0 }">
+              {{ (fundStore.holdingsSummary.today_profit > 0 ? '+' : '') + formatCurrency(fundStore.holdingsSummary.today_profit).slice(1) }}
+            </span>
+          </div>
+          <div class="summary-item">
+            <span class="label">收益率</span>
+            <span class="value" :class="{ profit: fundStore.holdingsSummary.profit_rate > 0, loss: fundStore.holdingsSummary.profit_rate < 0 }">
+              {{ formatPercent(fundStore.holdingsSummary.profit_rate) }}
+            </span>
+          </div>
         </div>
         <div class="profit-bar">
           <div class="profit-label">
@@ -138,7 +135,7 @@ function selectFund(fund) {
         <el-tag size="small" type="info" round>{{ fundStore.funds.length }}</el-tag>
       </div>
       
-      <el-scrollbar height="calc(100vh - 340px)">
+      <div class="fund-list-scroll">
         <div
           v-for="fund in fundStore.funds"
           :key="fund.fund_code"
@@ -148,7 +145,10 @@ function selectFund(fund) {
         >
           <div class="fund-main">
             <div class="fund-name">{{ fund.fund_name || '-' }}</div>
-            <div class="fund-code">{{ fund.fund_code }}</div>
+            <div class="fund-meta">
+              <span class="fund-code">{{ fund.fund_code }}</span>
+              <span v-if="fund.last_price_date" class="fund-date">{{ fund.last_price_date }}</span>
+            </div>
           </div>
           <div class="fund-growth" :class="{ positive: fund.last_growth_rate > 0, negative: fund.last_growth_rate < 0 }">
             {{ fund.last_growth_rate ? (fund.last_growth_rate > 0 ? '+' : '') + fund.last_growth_rate.toFixed(2) + '%' : '-' }}
@@ -156,7 +156,7 @@ function selectFund(fund) {
         </div>
         
         <el-empty v-if="fundStore.funds.length === 0" description="暂无基金" :image-size="60" />
-      </el-scrollbar>
+      </div>
     </div>
   </div>
 </template>
@@ -167,6 +167,7 @@ function selectFund(fund) {
   height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 /* 持仓汇总卡片 */
@@ -176,6 +177,7 @@ function selectFund(fund) {
   padding: 16px;
   margin-bottom: 16px;
   color: #fff;
+  flex-shrink: 0;
 }
 
 .summary-header {
@@ -267,6 +269,7 @@ function selectFund(fund) {
 .search-box {
   position: relative;
   margin-bottom: 16px;
+  flex-shrink: 0;
 }
 
 .search-box :deep(.el-input__wrapper) {
@@ -325,6 +328,7 @@ function selectFund(fund) {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 .list-header {
@@ -335,6 +339,13 @@ function selectFund(fund) {
   font-size: 13px;
   color: #909399;
   font-weight: 500;
+  flex-shrink: 0;
+}
+
+.fund-list-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .fund-item {
@@ -373,6 +384,20 @@ function selectFund(fund) {
 .fund-code {
   font-size: 12px;
   color: #909399;
+}
+
+.fund-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fund-date {
+  font-size: 11px;
+  color: #c0c4cc;
+  background: #f5f7fa;
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 .fund-growth {

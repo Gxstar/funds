@@ -11,9 +11,11 @@ export const useFundStore = defineStore('fund', () => {
     total_market_value: 0,
     total_profit: 0,
     profit_rate: 0,
+    today_profit: 0,
     fund_count: 0
   })
   const loading = ref(false)
+  const showAddDialog = ref(false)
   const chartData = ref(null)
   const etfData = ref(null)
   const recentTrades = ref([])
@@ -146,6 +148,7 @@ export const useFundStore = defineStore('fund', () => {
     try {
       await fundAPI.add(data)
       await loadFunds()
+      return data.fund_code
     } catch (error) {
       console.error('添加基金失败:', error)
       throw error
@@ -324,6 +327,7 @@ export const useFundStore = defineStore('fund', () => {
     currentFund,
     holdingsSummary,
     loading,
+    showAddDialog,
     chartData,
     etfData,
     recentTrades,

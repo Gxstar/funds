@@ -201,8 +201,14 @@ class MarketService:
             return []
 
     @staticmethod
-    async def sync_fund_history(fund_code: str, force: bool = False) -> dict:
-        """同步基金历史净值（增量更新）"""
+    async def sync_fund_history(fund_code: str, force: bool = False, retries: int = 2) -> dict:
+        """同步基金历史净值（增量更新，支持重试）
+        
+        Args:
+            fund_code: 基金代码
+            force: 是否强制全量同步
+            retries: 失败重试次数，默认 2 次
+        """
         # 获取本地最新日期
         latest_date = MarketService.get_latest_price_date(fund_code)
         today = date.today()
@@ -224,46 +230,59 @@ class MarketService:
         # 更新同步状态
         MarketService.update_cache_meta(fund_code, "pending")
         
-        try:
-            # 获取数据
-            prices = await MarketService.fetch_fund_history_from_akshare(
-                fund_code, start_date, today
-            )
-            
-            if prices:
-                # 保存到数据库
-                count = MarketService.save_prices(fund_code, prices)
-                
-                # 更新基金的最新净值信息
-                latest_price = prices[-1]
-                from services.fund_service import FundService
-                FundService.update_fund(
-                    fund_code,
-                    last_price_date=latest_price["date"],
-                    last_net_value=float(latest_price["net_value"]) if latest_price["net_value"] else None,
-                    last_growth_rate=float(latest_price.get("growth_rate")) if latest_price.get("growth_rate") else None
+        last_error = None
+        for attempt in range(retries + 1):
+            try:
+                # 获取数据
+                prices = await MarketService.fetch_fund_history_from_akshare(
+                    fund_code, start_date, today
                 )
-            else:
-                count = 0
-            
-            # 更新同步状态
-            MarketService.update_cache_meta(fund_code, "synced", today)
-            
-            return {
-                "fund_code": fund_code,
-                "status": "success",
-                "count": count,
-                "latest_date": prices[-1]["date"] if prices else latest_date
-            }
-        except Exception as e:
-            error_msg = str(e)
-            MarketService.update_cache_meta(fund_code, "failed", error_message=error_msg)
-            logger.error(f"同步基金历史失败 {fund_code}: {e}")
-            return {
-                "fund_code": fund_code,
-                "status": "failed",
-                "error": error_msg
-            }
+                
+                if prices:
+                    # 保存到数据库
+                    count = MarketService.save_prices(fund_code, prices)
+                    
+                    # 更新基金的最新净值信息
+                    latest_price = prices[-1]
+                    from services.fund_service import FundService
+                    FundService.update_fund(
+                        fund_code,
+                        last_price_date=latest_price["date"],
+                        last_net_value=float(latest_price["net_value"]) if latest_price["net_value"] else None,
+                        last_growth_rate=float(latest_price.get("growth_rate")) if latest_price.get("growth_rate") else None
+                    )
+                else:
+                    count = 0
+                
+                # 更新同步状态
+                MarketService.update_cache_meta(fund_code, "synced", today)
+                
+                # 同步成功后清除 AI 缓存
+                from services.ai_service import AICache
+                AICache.clear_cache(fund_code, "fund")
+                
+                return {
+                    "fund_code": fund_code,
+                    "status": "success",
+                    "count": count,
+                    "latest_date": prices[-1]["date"] if prices else latest_date
+                }
+            except Exception as e:
+                last_error = e
+                logger.warning(f"同步基金 {fund_code} 第 {attempt + 1} 次失败: {e}")
+                if attempt < retries:
+                    # 重试前等待 5 秒
+                    await asyncio.sleep(5)
+        
+        # 所有重试都失败
+        error_msg = str(last_error)
+        MarketService.update_cache_meta(fund_code, "failed", error_message=error_msg)
+        logger.error(f"同步基金历史失败 {fund_code}（已重试 {retries} 次）: {last_error}")
+        return {
+            "fund_code": fund_code,
+            "status": "failed",
+            "error": error_msg
+        }
 
     @staticmethod
     async def search_funds(keyword: str, limit: int = 20) -> List[dict]:
