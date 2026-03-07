@@ -197,6 +197,13 @@ function updateChart() {
     value: Math.round(parseFloat(f.total_shares) * parseFloat(f.last_net_value || 0))
   }))
   
+  // 统一的靛蓝色系配色
+  const indigoColors = [
+    '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe',
+    '#4f46e5', '#6366f1', '#8b5cf6', '#a78bfa',
+    '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'
+  ]
+
   if (chartType.value === 'pie') {
     chartInstance.setOption({
       title: { show: false },
@@ -209,6 +216,7 @@ function updateChart() {
         itemHeight: 8,
         textStyle: { fontSize: 11 }
       },
+      color: indigoColors,
       series: [{
         type: 'pie',
         radius: ['35%', '75%'],
@@ -233,6 +241,7 @@ function updateChart() {
         itemHeight: 8,
         textStyle: { fontSize: 11 }
       },
+      color: indigoColors,
       series: [{
         type: 'pie',
         radius: [15, '72%'],
@@ -575,7 +584,7 @@ onUnmounted(() => {
     <!-- 数据卡片 -->
     <el-row :gutter="24">
       <!-- 市场概况 -->
-      <el-col :span="12">
+      <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
         <div class="data-card">
           <div class="card-header">
             <span class="title">市场概况</span>
@@ -620,7 +629,7 @@ onUnmounted(() => {
       </el-col>
       
       <!-- 持仓分布 -->
-      <el-col :span="12">
+      <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
         <div class="data-card">
           <div class="card-header">
             <span class="title">持仓分布</span>
@@ -663,7 +672,7 @@ onUnmounted(() => {
       </el-col>
       
       <!-- 我的持仓（合并涨跌和明细） -->
-      <el-col :span="12">
+      <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
         <div class="data-card">
           <div class="card-header">
             <span class="title">我的持仓</span>
@@ -709,7 +718,7 @@ onUnmounted(() => {
       </el-col>
       
       <!-- 近期交易 -->
-      <el-col :span="12">
+      <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
         <div class="data-card">
           <div class="card-header">
             <span class="title">近期交易</span>
@@ -741,7 +750,7 @@ onUnmounted(() => {
       </el-col>
 
       <!-- 涨跌排行 -->
-      <el-col :span="12">
+      <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
         <div class="data-card">
           <div class="card-header">
             <span class="title">{{ changeRankType === 'daily' ? '涨跌排行' : '收益排行' }}</span>
@@ -910,12 +919,144 @@ onUnmounted(() => {
   max-width: 1400px;
 }
 
+/* 卡片入场动画 */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.stat-card {
+  animation: fadeInUp 0.5s ease-out backwards;
+}
+
+.stat-card:nth-child(1) { animation-delay: 0s; }
+.stat-card:nth-child(2) { animation-delay: 0.1s; }
+.stat-card:nth-child(3) { animation-delay: 0.2s; }
+.stat-card:nth-child(4) { animation-delay: 0.3s; }
+.stat-card:nth-child(5) { animation-delay: 0.4s; }
+
+.data-card {
+  animation: scaleIn 0.4s ease-out backwards;
+}
+
+/* 列表项入场动画 */
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.holding-item,
+.trade-item,
+.rank-item {
+  animation: slideInLeft 0.3s ease-out backwards;
+}
+
+/* 交错动画延迟 */
+.holding-item:nth-child(1),
+.trade-item:nth-child(1) { animation-delay: 0s; }
+
+.holding-item:nth-child(2),
+.trade-item:nth-child(2) { animation-delay: 0.05s; }
+
+.holding-item:nth-child(3),
+.trade-item:nth-child(3) { animation-delay: 0.1s; }
+
+.holding-item:nth-child(4),
+.trade-item:nth-child(4) { animation-delay: 0.15s; }
+
+.holding-item:nth-child(5),
+.trade-item:nth-child(5) { animation-delay: 0.2s; }
+
+.holding-item:nth-child(6),
+.trade-item:nth-child(6) { animation-delay: 0.25s; }
+
+/* 数字变化动画 */
+@keyframes countUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stat-value {
+  animation: countUp 0.6s ease-out;
+}
+
+/* 脉冲动画（用于强调） */
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
+.stat-card.highlight {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* 字体层级规范 */
+.text-h1 { font-size: 24px; font-weight: 700; line-height: 1.4; }
+.text-h2 { font-size: 20px; font-weight: 600; line-height: 1.4; }
+.text-h3 { font-size: 16px; font-weight: 600; line-height: 1.4; }
+.text-body { font-size: 14px; font-weight: 400; line-height: 1.5; }
+.text-caption { font-size: 12px; font-weight: 400; line-height: 1.5; color: #909399; }
+.text-small { font-size: 11px; font-weight: 400; line-height: 1.4; color: #a8abb2; }
+
 /* 统计卡片 */
 .stats-row {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 24px;
+  gap: 16px;
   margin-bottom: 24px;
+}
+
+@media (max-width: 1400px) {
+  .stats-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 992px) {
+  .stats-row {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+}
+
+@media (max-width: 576px) {
+  .stats-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
 }
 
 .stat-card {
@@ -1094,6 +1235,86 @@ onUnmounted(() => {
   padding: 16px 20px;
   flex: 1;
   min-height: 0;
+}
+
+/* 统一空状态样式 */
+.card-body .el-empty {
+  padding: 40px 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.card-body .el-empty .el-empty__image {
+  width: 80px;
+  height: 80px;
+  opacity: 0.6;
+}
+
+.card-body .el-empty .el-empty__description {
+  margin-top: 16px;
+  font-size: 13px;
+  color: #909399;
+}
+
+/* 骨架屏样式 */
+.skeleton-container {
+  padding: 20px 0;
+}
+
+.skeleton-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+
+.skeleton-item {
+  background: linear-gradient(90deg, #f0f2f5 25%, #e8e8e8 50%, #f0f2f5 75%);
+  background-size: 200% 100%;
+  border-radius: 6px;
+  animation: skeleton-loading 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* 全局加载动画 */
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.9);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  border-radius: 16px;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #f0f0f0;
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .chart-container {
@@ -1526,6 +1747,56 @@ onUnmounted(() => {
 
 .rank-rate.down {
   color: #16a34a;
+}
+
+/* 自定义滚动条样式 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Firefox 滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+}
+
+/* Element Plus 滚动条容器 */
+.el-scrollbar__bar {
+  opacity: 0.3;
+  transition: opacity 0.3s;
+}
+
+.el-scrollbar__bar.is-horizontal {
+  height: 6px;
+}
+
+.el-scrollbar__bar.is-vertical {
+  width: 6px;
+}
+
+.el-scrollbar:hover .el-scrollbar__bar {
+  opacity: 0.6;
+}
+
+.el-scrollbar__thumb {
+  background-color: #9ca3af;
+  border-radius: 3px;
 }
 
 /* 指数选择对话框 */
