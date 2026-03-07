@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useFundStore } from '@/stores/funds'
-import { aiAPI, marketAPI } from '@/api'
+import { aiAPI, marketAPI, holdingAPI } from '@/api'
 import { formatCurrency, formatPercent, formatDate, formatDateTime } from '@/utils/format'
 import * as echarts from 'echarts'
 import { marked } from 'marked'
@@ -21,6 +21,18 @@ const portfolioLoading = ref(false)
 const portfolioAnalysis = ref(null)
 const pieChart = ref(null)
 let chartInstance = null
+
+// 历史收益图表
+const portfolioHistoryChart = ref(null)
+let historyChartInstance = null
+const portfolioHistory = ref({
+  dates: [],
+  market_values: [],
+  costs: [],
+  profits: [],
+  profit_rates: []
+})
+const portfolioHistoryLoading = ref(false)
 
 // 市场指数数据
 const indicesData = ref([])
@@ -97,6 +109,54 @@ const changeStats = computed(() => {
   }
 })
 
+// 涨跌排行类型切换：'daily' 当日涨跌，'hold' 持有收益
+const changeRankType = ref('daily')
+
+// 涨跌排行（取前3涨和前3跌）
+const topChanges = computed(() => {
+  const holdings = fundStore.hasHoldingFunds
+  
+  if (changeRankType.value === 'daily') {
+    // 当日涨跌排行
+    const funds = holdings
+      .filter(f => f.last_growth_rate !== null && f.last_growth_rate !== undefined)
+      .sort((a, b) => parseFloat(b.last_growth_rate) - parseFloat(a.last_growth_rate))
+    
+    return {
+      topGainers: funds.slice(0, 3).map(f => ({
+        ...f,
+        displayRate: f.last_growth_rate,
+        isDaily: true
+      })),
+      topLosers: funds.slice(-3).reverse().map(f => ({
+        ...f,
+        displayRate: f.last_growth_rate,
+        isDaily: true
+      }))
+    }
+  } else {
+    // 持有收益排行
+    const funds = holdings
+      .filter(f => f.total_cost && parseFloat(f.total_cost) > 0 && f.last_net_value)
+      .map(f => {
+        const currentValue = parseFloat(f.total_shares || 0) * parseFloat(f.last_net_value || 0)
+        const cost = parseFloat(f.total_cost || 0)
+        const profitRate = cost > 0 ? ((currentValue - cost) / cost * 100) : 0
+        return {
+          ...f,
+          displayRate: profitRate,
+          isDaily: false
+        }
+      })
+      .sort((a, b) => b.displayRate - a.displayRate)
+    
+    return {
+      topGainers: funds.slice(0, 3),
+      topLosers: funds.slice(-3).reverse()
+    }
+  }
+})
+
 // 分析弹窗显示控制
 const showAnalysisDialog = computed({
   get: () => portfolioLoading.value || !!portfolioAnalysis.value,
@@ -104,11 +164,11 @@ const showAnalysisDialog = computed({
 })
 
 // 图表类型切换
-const chartType = ref('pie') // 'pie' 或 'treemap'
+const chartType = ref('pie') // 'pie' 或 'rose'
 
 // 切换图表类型
 function toggleChartType() {
-  chartType.value = chartType.value === 'pie' ? 'treemap' : 'pie'
+  chartType.value = chartType.value === 'pie' ? 'rose' : 'pie'
   updateChart()
 }
 
@@ -141,42 +201,164 @@ function updateChart() {
     chartInstance.setOption({
       title: { show: false },
       tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
-      legend: { orient: 'vertical', right: 10, top: 'center', itemWidth: 10, itemHeight: 10 },
+      legend: { 
+        orient: 'vertical', 
+        right: 5, 
+        top: 'middle',
+        itemWidth: 8, 
+        itemHeight: 8,
+        textStyle: { fontSize: 11 }
+      },
       series: [{
         type: 'pie',
-        radius: ['40%', '70%'],
-        center: ['35%', '50%'],
+        radius: ['35%', '75%'],
+        center: ['38%', '50%'],
         avoidLabelOverlap: false,
-        itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+        itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
         label: { show: false },
-        emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
+        emphasis: { label: { show: true, fontSize: 13, fontWeight: 'bold' } },
         data
       }]
     }, true)
   } else {
-    // 矩形树图
+    // 南丁格尔玫瑰图
     chartInstance.setOption({
       title: { show: false },
-      tooltip: { trigger: 'item', formatter: '{b}: ¥{c}' },
-      legend: { show: false },
+      tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+      legend: { 
+        orient: 'vertical', 
+        right: 5, 
+        top: 'middle',
+        itemWidth: 8, 
+        itemHeight: 8,
+        textStyle: { fontSize: 11 }
+      },
       series: [{
-        type: 'treemap',
-        roam: false,
-        nodeClick: false,
-        breadcrumb: { show: false },
-        label: { show: true, fontSize: 11, overflow: 'truncate', ellipsis: '...' },
-        upperLabel: { show: true, height: 20 },
-        itemStyle: { borderRadius: 4, gapWidth: 2, borderColor: '#fff', borderWidth: 2 },
-        emphasis: { focus: 'descendant' },
-        levels: [
-          {
-            itemStyle: { borderWidth: 2, gapWidth: 2 }
-          }
-        ],
+        type: 'pie',
+        radius: [15, '72%'],
+        center: ['38%', '50%'],
+        roseType: 'radius',
+        itemStyle: { borderRadius: 3, borderColor: '#fff', borderWidth: 1 },
+        label: { show: false },
+        emphasis: { 
+          label: { show: true, fontSize: 12, fontWeight: 'bold' },
+          itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.2)' }
+        },
         data
       }]
     }, true)
   }
+}
+
+// 加载持仓历史收益
+async function loadPortfolioHistory() {
+  portfolioHistoryLoading.value = true
+  try {
+    const result = await holdingAPI.getPortfolioHistory(90)
+    portfolioHistory.value = result
+    initPortfolioHistoryChart()
+  } catch (error) {
+    console.error('加载持仓历史收益失败:', error)
+  } finally {
+    portfolioHistoryLoading.value = false
+  }
+}
+
+// 初始化历史收益图表
+function initPortfolioHistoryChart() {
+  if (!portfolioHistoryChart.value) return
+  
+  if (historyChartInstance) {
+    historyChartInstance.dispose()
+  }
+  
+  historyChartInstance = echarts.init(portfolioHistoryChart.value)
+  
+  const { dates, profits, profit_rates } = portfolioHistory.value
+  
+  if (dates.length === 0) {
+    historyChartInstance.setOption({
+      title: { text: '暂无数据', left: 'center', top: 'center', textStyle: { color: '#909399' } }
+    }, true)
+    return
+  }
+  
+  // 使用靛蓝色作为主色调，不区分盈亏
+  const lineColor = '#6366f1'
+  const areaColor = 'rgba(99, 102, 241, 0.15)'
+  
+  historyChartInstance.setOption({
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      formatter: function(params) {
+        const idx = params[0].dataIndex
+        return `
+          <div style="font-weight:600;margin-bottom:4px">${dates[idx]}</div>
+          <div>累计收益: <span style="color:${profits[idx] >= 0 ? '#dc2626' : '#16a34a'};font-weight:600">${profits[idx] >= 0 ? '+' : ''}¥${profits[idx].toLocaleString()}</span></div>
+          <div>收益率: <span style="color:${profit_rates[idx] >= 0 ? '#dc2626' : '#16a34a'};font-weight:600">${profit_rates[idx] >= 0 ? '+' : ''}${profit_rates[idx].toFixed(2)}%</span></div>
+        `
+      }
+    },
+    grid: {
+      left: 10,
+      right: 10,
+      top: 10,
+      bottom: 10,
+      containLabel: true
+    },
+    xAxis: {
+      type: 'category',
+      data: dates,
+      boundaryGap: false,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { 
+        show: true,
+        fontSize: 10,
+        color: '#909399',
+        formatter: function(value) {
+          const date = new Date(value)
+          return `${date.getMonth() + 1}/${date.getDate()}`
+        }
+      }
+    },
+    yAxis: {
+      type: 'value',
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { 
+        lineStyle: { 
+          type: 'dashed',
+          color: '#f0f0f0'
+        }
+      },
+      axisLabel: {
+        fontSize: 10,
+        color: '#909399',
+        formatter: function(value) {
+          if (Math.abs(value) >= 10000) {
+            return (value / 10000).toFixed(1) + 'w'
+          }
+          return value
+        }
+      }
+    },
+    series: [{
+      name: '累计收益',
+      type: 'line',
+      smooth: true,
+      symbol: 'none',
+      lineStyle: {
+        width: 2,
+        color: lineColor
+      },
+      areaStyle: {
+        color: areaColor
+      },
+      data: profits
+    }]
+  }, true)
 }
 
 // 加载市场指数
@@ -189,7 +371,7 @@ async function loadIndices(skipCache = false) {
     indicesIsToday.value = result.is_today !== false
     indicesUpdateTime.value = result.update_time || ''
   } catch (error) {
-    console.error('加载市场指数失败:', error)
+    console.error('加载市场指数 failed:', error)
   } finally {
     indicesLoading.value = false
   }
@@ -304,18 +486,26 @@ onMounted(async () => {
     fundStore.loadHoldingsSummary(),
     fundStore.loadAISettings(),
     fundStore.loadRecentTrades(10),
-    loadIndices()
+    loadIndices(),
+    loadPortfolioHistory()
   ])
   
   // 需要在数据加载后初始化图表
   setTimeout(initPieChart, 100)
   
-  window.addEventListener('resize', () => chartInstance?.resize())
+  window.addEventListener('resize', () => {
+    chartInstance?.resize()
+    historyChartInstance?.resize()
+  })
 })
 
 onUnmounted(() => {
   chartInstance?.dispose()
-  window.removeEventListener('resize', () => chartInstance?.resize())
+  historyChartInstance?.dispose()
+  window.removeEventListener('resize', () => {
+    chartInstance?.resize()
+    historyChartInstance?.resize()
+  })
 })
 </script>
 
@@ -442,15 +632,32 @@ onUnmounted(() => {
                 <el-icon><PieChart /></el-icon>
               </el-button>
               <el-button 
-                :type="chartType === 'treemap' ? 'primary' : ''" 
-                @click="chartType = 'treemap'; updateChart()"
+                :type="chartType === 'rose' ? 'primary' : ''" 
+                @click="chartType = 'rose'; updateChart()"
               >
-                <el-icon><Grid /></el-icon>
+                <el-icon><Share /></el-icon>
               </el-button>
             </el-button-group>
           </div>
           <div class="card-body">
             <div ref="pieChart" class="chart-container"></div>
+          </div>
+        </div>
+      </el-col>
+
+      <!-- 历史收益 -->
+      <el-col :span="12">
+        <div class="data-card">
+          <div class="card-header">
+            <span class="title">历史收益</span>
+            <div class="header-stats" v-if="portfolioHistory.profits.length > 0">
+              <span class="history-summary" :class="{ profit: portfolioHistory.profits[portfolioHistory.profits.length - 1] >= 0, loss: portfolioHistory.profits[portfolioHistory.profits.length - 1] < 0 }">
+                {{ portfolioHistory.profits[portfolioHistory.profits.length - 1] >= 0 ? '+' : '' }}{{ formatCurrency(portfolioHistory.profits[portfolioHistory.profits.length - 1]) }}
+              </span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div ref="portfolioHistoryChart" class="chart-container" v-loading="portfolioHistoryLoading"></div>
           </div>
         </div>
       </el-col>
@@ -467,7 +674,7 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="card-body">
-            <el-scrollbar height="280px">
+            <el-scrollbar height="240px">
               <div class="list-container">
                 <div
                   v-for="fund in sortedHoldings"
@@ -508,7 +715,7 @@ onUnmounted(() => {
             <span class="title">近期交易</span>
           </div>
           <div class="card-body">
-            <el-scrollbar height="280px">
+            <el-scrollbar height="240px">
               <div class="list-container">
                 <div
                   v-for="trade in fundStore.recentTrades"
@@ -529,6 +736,77 @@ onUnmounted(() => {
                 <el-empty v-if="fundStore.recentTrades.length === 0" description="暂无交易记录" :image-size="60" />
               </div>
             </el-scrollbar>
+          </div>
+        </div>
+      </el-col>
+
+      <!-- 涨跌排行 -->
+      <el-col :span="12">
+        <div class="data-card">
+          <div class="card-header">
+            <span class="title">{{ changeRankType === 'daily' ? '涨跌排行' : '收益排行' }}</span>
+            <el-button-group size="small">
+              <el-button 
+                :type="changeRankType === 'daily' ? 'primary' : ''" 
+                @click="changeRankType = 'daily'"
+              >
+                当日
+              </el-button>
+              <el-button 
+                :type="changeRankType === 'hold' ? 'primary' : ''" 
+                @click="changeRankType = 'hold'"
+              >
+                持有
+              </el-button>
+            </el-button-group>
+          </div>
+          <div class="card-body">
+            <div class="change-rank-container">
+              <!-- 涨幅榜 -->
+              <div class="rank-section">
+                <div class="rank-title up">
+                  <el-icon><Top /></el-icon>
+                  <span>{{ changeRankType === 'daily' ? '涨幅前三' : '收益前三' }}</span>
+                </div>
+                <div class="rank-list">
+                  <div
+                    v-for="(fund, index) in topChanges.topGainers"
+                    :key="fund.fund_code"
+                    class="rank-item"
+                    @click="goToFund(fund.fund_code)"
+                  >
+                    <span class="rank-num">{{ index + 1 }}</span>
+                    <span class="rank-name">{{ fund.fund_name }}</span>
+                    <span class="rank-rate" :class="{ up: fund.displayRate > 0, down: fund.displayRate < 0 }">
+                      {{ fund.displayRate > 0 ? '+' : '' }}{{ fund.displayRate.toFixed(2) }}%
+                    </span>
+                  </div>
+                  <el-empty v-if="topChanges.topGainers.length === 0" description="暂无数据" :image-size="40" />
+                </div>
+              </div>
+              <!-- 跌幅榜 -->
+              <div class="rank-section">
+                <div class="rank-title down">
+                  <el-icon><Bottom /></el-icon>
+                  <span>{{ changeRankType === 'daily' ? '跌幅前三' : '亏损前三' }}</span>
+                </div>
+                <div class="rank-list">
+                  <div
+                    v-for="(fund, index) in topChanges.topLosers"
+                    :key="fund.fund_code"
+                    class="rank-item"
+                    @click="goToFund(fund.fund_code)"
+                  >
+                    <span class="rank-num">{{ index + 1 }}</span>
+                    <span class="rank-name">{{ fund.fund_name }}</span>
+                    <span class="rank-rate" :class="{ up: fund.displayRate > 0, down: fund.displayRate < 0 }">
+                      {{ fund.displayRate > 0 ? '+' : '' }}{{ fund.displayRate.toFixed(2) }}%
+                    </span>
+                  </div>
+                  <el-empty v-if="topChanges.topLosers.length === 0" description="暂无数据" :image-size="40" />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </el-col>
@@ -768,6 +1046,9 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 6px 20px rgba(0, 0, 0, 0.04);
   overflow: hidden;
   transition: all 0.3s;
+  height: 340px;
+  display: flex;
+  flex-direction: column;
 }
 
 .data-card:hover {
@@ -778,8 +1059,9 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 24px;
+  padding: 16px 20px;
   border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
 }
 
 .card-header .title {
@@ -809,13 +1091,29 @@ onUnmounted(() => {
 }
 
 .card-body {
-  padding: 20px 24px;
+  padding: 16px 20px;
+  flex: 1;
+  min-height: 0;
 }
 
 .chart-container {
   width: 100%;
   height: 240px;
   overflow: hidden;
+}
+
+/* 历史收益摘要 */
+.history-summary {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-summary.profit {
+  color: #dc2626;
+}
+
+.history-summary.loss {
+  color: #16a34a;
 }
 
 /* 市场指数 */
@@ -825,6 +1123,11 @@ onUnmounted(() => {
   grid-template-rows: repeat(2, 1fr);
   gap: 12px;
   height: 240px;
+}
+
+/* 确保 el-scrollbar 在卡片内高度一致 */
+.card-body .el-scrollbar {
+  height: 240px !important;
 }
 
 .index-item {
@@ -1115,6 +1418,114 @@ onUnmounted(() => {
 .update-time {
   font-size: 12px;
   color: #909399;
+}
+
+/* 涨跌排行 */
+.change-rank-container {
+  display: flex;
+  gap: 20px;
+  height: 240px;
+}
+
+.rank-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.rank-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.rank-title.up {
+  color: #dc2626;
+}
+
+.rank-title.down {
+  color: #16a34a;
+}
+
+.rank-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rank-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+}
+
+.rank-item:hover {
+  background: #f0f7ff;
+  border-color: #1890ff;
+}
+
+.rank-num {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e2e8f0;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.rank-item:nth-child(1) .rank-num {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.rank-item:nth-child(2) .rank-num {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.rank-item:nth-child(3) .rank-num {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.rank-name {
+  flex: 1;
+  font-size: 12px;
+  color: #1a1a2e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rank-rate {
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.rank-rate.up {
+  color: #dc2626;
+}
+
+.rank-rate.down {
+  color: #16a34a;
 }
 
 /* 指数选择对话框 */

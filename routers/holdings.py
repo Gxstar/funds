@@ -1,5 +1,5 @@
 """持仓管理路由"""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from decimal import Decimal
 
@@ -73,3 +73,14 @@ async def recalculate_holding(fund_code: str):
     if result is None:
         return {"message": "持仓已清空"}
     return result
+
+
+@router.get("/history/portfolio")
+async def get_portfolio_history(days: int = Query(default=90, ge=30, le=365)):
+    """获取持仓组合历史收益数据
+    
+    Args:
+        days: 获取最近多少天的数据，默认90天，范围30-365
+    """
+    history = FundService.get_portfolio_history(days)
+    return history

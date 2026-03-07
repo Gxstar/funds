@@ -444,3 +444,146 @@ class FundService:
             else:
                 FundService.delete_holding(fund_code)
                 return None
+
+    @staticmethod
+    def get_portfolio_history(days: int = 90) -> dict:
+        """获取持仓组合历史收益数据
+        
+        Args:
+            days: 获取最近多少天的数据，默认90天
+            
+        Returns:
+            包含日期、总市值、总成本、累计收益的字典
+        """
+        from datetime import timedelta
+        
+        end_date = date.today()
+        start_date = end_date - timedelta(days=days)
+        
+        with get_db_context() as conn:
+            cursor = conn.cursor()
+            
+            # 获取所有持仓基金
+            cursor.execute("""
+                SELECT h.fund_code, h.total_shares, h.total_cost, f.fund_name
+                FROM holdings h
+                JOIN funds f ON h.fund_code = f.fund_code
+            """)
+            holdings = {row["fund_code"]: dict(row) for row in cursor.fetchall()}
+            
+            if not holdings:
+                return {"dates": [], "market_values": [], "costs": [], "profits": [], "profit_rates": []}
+            
+            # 获取所有持仓基金在日期范围内的净值
+            fund_codes = list(holdings.keys())
+            placeholders = ",".join(["%s"] * len(fund_codes))
+            
+            cursor.execute(f"""
+                SELECT fund_code, date, net_value
+                FROM prices
+                WHERE fund_code IN ({placeholders})
+                AND date >= %s AND date <= %s
+                ORDER BY date ASC
+            """, fund_codes + [start_date, end_date])
+            
+            prices = cursor.fetchall()
+            
+            # 按日期分组计算总市值
+            from collections import defaultdict
+            daily_prices = defaultdict(dict)
+            for p in prices:
+                daily_prices[p["date"]][p["fund_code"]] = float(p["net_value"] or 0)
+            
+            # 获取每只基金的交易记录，用于计算每日成本
+            cursor.execute(f"""
+                SELECT fund_code, trade_date, trade_type, amount, confirm_shares
+                FROM trades
+                WHERE fund_code IN ({placeholders})
+                AND trade_date <= %s
+                ORDER BY trade_date ASC
+            """, fund_codes + [end_date])
+            
+            trades = cursor.fetchall()
+            
+            # 按基金分组交易记录
+            fund_trades = defaultdict(list)
+            for t in trades:
+                fund_trades[t["fund_code"]].append({
+                    "date": t["trade_date"],
+                    "type": t["trade_type"],
+                    "amount": float(t["amount"] or 0),
+                    "shares": float(t["confirm_shares"] or 0)
+                })
+            
+            # 计算每日数据
+            dates = sorted(daily_prices.keys())
+            market_values = []
+            costs = []
+            profits = []
+            profit_rates = []
+            
+            for d in dates:
+                daily_market_value = 0
+                daily_cost = 0
+                
+                for code, holding in holdings.items():
+                    if code in daily_prices[d]:
+                        # 计算当日持仓份额（考虑交易记录）
+                        shares = FundService._calculate_shares_on_date(
+                            code, d, float(holding["total_shares"]), fund_trades[code]
+                        )
+                        
+                        value = shares * daily_prices[d][code]
+                        daily_market_value += value
+                        
+                        # 计算当日成本
+                        cost = FundService._calculate_cost_on_date(
+                            code, d, float(holding["total_cost"]), fund_trades[code]
+                        )
+                        daily_cost += cost
+                
+                market_values.append(round(daily_market_value, 2))
+                costs.append(round(daily_cost, 2))
+                profit = daily_market_value - daily_cost
+                profits.append(round(profit, 2))
+                profit_rate = (profit / daily_cost * 100) if daily_cost > 0 else 0
+                profit_rates.append(round(profit_rate, 2))
+            
+            return {
+                "dates": dates,
+                "market_values": market_values,
+                "costs": costs,
+                "profits": profits,
+                "profit_rates": profit_rates
+            }
+    
+    @staticmethod
+    def _calculate_shares_on_date(fund_code: str, target_date: date, current_shares: float, trades: list) -> float:
+        """计算某日期之前的持仓份额（逆向推算）"""
+        shares = current_shares
+        
+        # 从后往前遍历交易，减去之后的交易
+        for trade in reversed(trades):
+            if trade["date"] > target_date:
+                if trade["type"] == "BUY":
+                    shares -= trade["shares"]
+                else:
+                    shares += trade["shares"]
+        
+        return max(0, shares)
+    
+    @staticmethod
+    def _calculate_cost_on_date(fund_code: str, target_date: date, current_cost: float, trades: list) -> float:
+        """计算某日期之前的投入成本（逆向推算）"""
+        cost = current_cost
+        
+        # 从后往前遍历交易，减去之后的交易
+        for trade in reversed(trades):
+            if trade["date"] > target_date:
+                if trade["type"] == "BUY":
+                    cost -= trade["amount"]
+                else:
+                    # 卖出按成本价加回，这里简化处理
+                    cost += trade["amount"]
+        
+        return max(0, cost)

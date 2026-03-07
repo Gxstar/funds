@@ -43,6 +43,7 @@ export const holdingAPI = {
   update: (code, data) => request(`${API_BASE}/holdings/${code}`, { method: 'PUT', body: data }),
   delete: (code) => request(`${API_BASE}/holdings/${code}`, { method: 'DELETE' }),
   recalculate: (code) => request(`${API_BASE}/holdings/${code}/recalculate`, { method: 'POST' }),
+  getPortfolioHistory: (days = 90) => request(`${API_BASE}/holdings/history/portfolio?days=${days}`),
 }
 
 // 交易相关 API

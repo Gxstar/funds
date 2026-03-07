@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Search, MagicStick } from '@element-plus/icons-vue'
 import { useFundStore } from '@/stores/funds'
@@ -22,6 +22,24 @@ const emit = defineEmits(['ai-analysis'])
 const searchKeyword = ref('')
 const searchResults = ref([])
 const searching = ref(false)
+
+// 涨跌显示类型切换：'daily' 当日涨跌，'hold' 持有收益
+const growthDisplayType = ref('daily')
+
+// 获取基金的显示收益率
+function getFundGrowthRate(fund) {
+  if (growthDisplayType.value === 'daily') {
+    return fund.last_growth_rate
+  } else {
+    // 持有收益率 = (市值 - 成本) / 成本
+    const marketValue = parseFloat(fund.total_shares || 0) * parseFloat(fund.last_net_value || 0)
+    const cost = parseFloat(fund.total_cost || 0)
+    if (cost > 0) {
+      return ((marketValue - cost) / cost * 100)
+    }
+    return null
+  }
+}
 
 // 搜索基金
 let searchTimeout
@@ -141,8 +159,24 @@ function selectFund(fund) {
     <!-- 基金列表 -->
     <div class="fund-list">
       <div class="list-header">
-        <span>我的基金</span>
-        <el-tag size="small" type="info" round>{{ fundStore.funds.length }}</el-tag>
+        <div class="list-header-left">
+          <span>我的基金</span>
+          <el-tag size="small" type="info" round>{{ fundStore.funds.length }}</el-tag>
+        </div>
+        <el-button-group size="small">
+          <el-button 
+            :type="growthDisplayType === 'daily' ? 'primary' : ''" 
+            @click.stop="growthDisplayType = 'daily'"
+          >
+            当日
+          </el-button>
+          <el-button 
+            :type="growthDisplayType === 'hold' ? 'primary' : ''" 
+            @click.stop="growthDisplayType = 'hold'"
+          >
+            持有
+          </el-button>
+        </el-button-group>
       </div>
       
       <div class="fund-list-scroll">
@@ -160,8 +194,8 @@ function selectFund(fund) {
               <span v-if="fund.last_price_date" class="fund-date">{{ fund.last_price_date }}</span>
             </div>
           </div>
-          <div class="fund-growth" :class="{ positive: fund.last_growth_rate > 0, negative: fund.last_growth_rate < 0 }">
-            {{ fund.last_growth_rate ? (fund.last_growth_rate > 0 ? '+' : '') + fund.last_growth_rate.toFixed(2) + '%' : '-' }}
+          <div class="fund-growth" :class="{ positive: getFundGrowthRate(fund) > 0, negative: getFundGrowthRate(fund) < 0 }">
+            {{ getFundGrowthRate(fund) ? (getFundGrowthRate(fund) > 0 ? '+' : '') + getFundGrowthRate(fund).toFixed(2) + '%' : '-' }}
           </div>
         </div>
         
@@ -384,6 +418,12 @@ function selectFund(fund) {
   color: #909399;
   font-weight: 500;
   flex-shrink: 0;
+}
+
+.list-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .fund-list-scroll {
