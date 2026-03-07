@@ -87,24 +87,38 @@ def get_setting(key: str) -> Optional[str]:
             return env_value
     
     # 否则从数据库读取
+    db_type = os.getenv("DB_TYPE", "postgresql").lower()
+
     with get_db_context() as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT value FROM settings WHERE key = %s", (key,)
-        )
+        if db_type == "sqlite":
+            cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        else:
+            cursor.execute("SELECT value FROM settings WHERE key = %s", (key,))
         row = cursor.fetchone()
         return row["value"] if row else None
 
 
 def set_setting(key: str, value: str) -> None:
     """设置值到数据库"""
+    db_type = os.getenv("DB_TYPE", "postgresql").lower()
+    now = datetime.now()
+    
     with get_db_context() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO settings (key, value, updated_at) 
-            VALUES (%s, %s, %s)
-            ON CONFLICT (key) DO UPDATE SET value = %s, updated_at = %s
-        """, (key, value, datetime.now(), value, datetime.now()))
+        if db_type == "sqlite":
+            # SQLite 语法
+            cursor.execute("""
+                INSERT OR REPLACE INTO settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+            """, (key, value, now))
+        else:
+            # PostgreSQL 语法
+            cursor.execute("""
+                INSERT INTO settings (key, value, updated_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (key) DO UPDATE SET value = %s, updated_at = %s
+            """, (key, value, now, value, now))
 
 
 def set_env_setting(key: str, value: Optional[str]) -> None:

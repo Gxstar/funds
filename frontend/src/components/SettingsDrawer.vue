@@ -53,7 +53,6 @@ const fundVariables = [
   { name: 'fund_name', desc: '基金名称' },
   { name: 'fund_code', desc: '基金代码' },
   { name: 'fund_type', desc: '基金类型' },
-  { name: 'risk_level', desc: '风险等级' },
   { name: 'current_value', desc: '当前净值' },
   { name: 'change_5d', desc: '近5日涨跌幅' },
   { name: 'change_20d', desc: '近20日涨跌幅' },
@@ -124,28 +123,7 @@ async function loadSettings() {
 // 保存设置
 async function saveAllSettings() {
   try {
-    // 保存通用设置
-    await aiAPI.updatePositionSetting({ total_position_amount: generalSettings.value.total_position_amount })
-    
-    // 保存 AI 设置
-    const aiData = {}
-    if (aiSettings.value.api_key) aiData.deepseek_api_key = aiSettings.value.api_key
-    if (aiSettings.value.base_url) aiData.deepseek_base_url = aiSettings.value.base_url
-    if (aiSettings.value.model) aiData.deepseek_model = aiSettings.value.model
-    if (Object.keys(aiData).length > 0) {
-      await aiAPI.updateSettings(aiData)
-    }
-    
-    // 保存提示词 - 转换为后端期望的格式
-    const promptsData = {
-      fund_analysis_system: promptConfig.value.fund_analysis?.system_prompt || null,
-      fund_analysis_user: promptConfig.value.fund_analysis?.user_prompt || null,
-      portfolio_analysis_system: promptConfig.value.portfolio_analysis?.system_prompt || null,
-      portfolio_analysis_user: promptConfig.value.portfolio_analysis?.user_prompt || null
-    }
-    await settingsAPI.updatePrompts(promptsData)
-    
-    // 保存数据库配置
+    // 1. 先保存数据库配置（最重要，影响后续所有数据库操作）
     const dbData = {
       db_type: dbConfig.value.type,
       sqlite_path: dbConfig.value.sqlite_path,
@@ -156,6 +134,27 @@ async function saveAllSettings() {
       pg_password: dbConfig.value.pg_password  // 如果为空，后端会保留原密码
     }
     await settingsAPI.updateDatabaseConfig(dbData)
+
+    // 2. 保存通用设置（依赖数据库配置）
+    await aiAPI.updatePositionSetting({ total_position_amount: generalSettings.value.total_position_amount })
+
+    // 3. 保存 AI 设置
+    const aiData = {}
+    if (aiSettings.value.api_key) aiData.deepseek_api_key = aiSettings.value.api_key
+    if (aiSettings.value.base_url) aiData.deepseek_base_url = aiSettings.value.base_url
+    if (aiSettings.value.model) aiData.deepseek_model = aiSettings.value.model
+    if (Object.keys(aiData).length > 0) {
+      await aiAPI.updateSettings(aiData)
+    }
+
+    // 4. 保存提示词 - 转换为后端期望的格式
+    const promptsData = {
+      fund_analysis_system: promptConfig.value.fund_analysis?.system_prompt || null,
+      fund_analysis_user: promptConfig.value.fund_analysis?.user_prompt || null,
+      portfolio_analysis_system: promptConfig.value.portfolio_analysis?.system_prompt || null,
+      portfolio_analysis_user: promptConfig.value.portfolio_analysis?.user_prompt || null
+    }
+    await settingsAPI.updatePrompts(promptsData)
     
     ElMessage.success('设置已保存，重启应用后生效')
     visible.value = false

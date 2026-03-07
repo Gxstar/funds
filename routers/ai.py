@@ -230,7 +230,6 @@ PROMPT_VARIABLES = {
         "fund_name": "基金名称",
         "fund_code": "基金代码",
         "fund_type": "基金类型",
-        "risk_level": "风险等级",
         "fund_detail": "基金详情（经理、规模、成立时间等）",
         "current_value": "当前净值",
         "change_5d": "近5日涨跌幅(%)",
@@ -319,7 +318,6 @@ async def reset_prompts_config():
 - 基金名称: {fund_name}
 - 基金代码: {fund_code}
 - 基金类型: {fund_type}
-- 风险等级: {risk_level}
 
 ## 基金详情
 {fund_detail}
@@ -458,29 +456,39 @@ async def update_database_config(config: DatabaseConfigUpdate):
                         key, _, value = line.partition("=")
                         env_vars[key.strip()] = value.strip()
         
-        # 更新数据库类型
-        env_vars["DB_TYPE"] = config.db_type.lower()
+        # 更新数据库类型（同时更新 env_vars 和 os.environ）
+        db_type = config.db_type.lower()
+        env_vars["DB_TYPE"] = db_type
+        os.environ["DB_TYPE"] = db_type
         
-        if config.db_type.lower() == "sqlite":
+        if db_type == "sqlite":
             if config.sqlite_path:
                 env_vars["SQLITE_PATH"] = config.sqlite_path
+                os.environ["SQLITE_PATH"] = config.sqlite_path
             # 清除 PostgreSQL 配置
             for key in ["DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"]:
                 env_vars.pop(key, None)
+                os.environ.pop(key, None)
         else:
             if config.pg_host:
                 env_vars["DB_HOST"] = config.pg_host
+                os.environ["DB_HOST"] = config.pg_host
             if config.pg_port:
                 env_vars["DB_PORT"] = config.pg_port
+                os.environ["DB_PORT"] = config.pg_port
             if config.pg_name:
                 env_vars["DB_NAME"] = config.pg_name
+                os.environ["DB_NAME"] = config.pg_name
             if config.pg_user:
                 env_vars["DB_USER"] = config.pg_user
+                os.environ["DB_USER"] = config.pg_user
             # 只有当提供了新密码时才更新，否则保留原有密码
             if config.pg_password:
                 env_vars["DB_PASSWORD"] = config.pg_password
+                os.environ["DB_PASSWORD"] = config.pg_password
             # 清除 SQLite 配置
             env_vars.pop("SQLITE_PATH", None)
+            os.environ.pop("SQLITE_PATH", None)
         
         # 写入 .env 文件
         lines = ["# 数据库配置", ""]
@@ -605,7 +613,6 @@ async def initialize_database(request: DatabaseTestRequest):
                     fund_code VARCHAR(6) UNIQUE NOT NULL,
                     fund_name VARCHAR(100) NOT NULL,
                     fund_type VARCHAR(50),
-                    risk_level VARCHAR(10),
                     related_etf VARCHAR(20),
                     last_price_date DATE,
                     last_net_value REAL,
@@ -711,8 +718,7 @@ async def initialize_database(request: DatabaseTestRequest):
         else:
             # PostgreSQL 初始化使用原有的 init_db 逻辑
             from database import init_db
-            from database.connection import DB_TYPE, DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
-            
+
             # 临时修改连接参数
             import os
             original_host = os.environ.get("DB_HOST")
@@ -757,7 +763,10 @@ async def get_database_status():
     """获取当前数据库连接状态和表信息"""
     import os
     from pathlib import Path
-    from database.connection import DB_TYPE, SQLITE_PATH
+    
+    # 从环境变量读取配置
+    db_type = os.getenv("DB_TYPE", "postgresql").lower()
+    sqlite_path = os.getenv("SQLITE_PATH", "data/funds.db")
     
     try:
         # 尝试连接数据库
@@ -766,7 +775,7 @@ async def get_database_status():
         cursor = conn.cursor()
         
         # 获取表信息
-        if DB_TYPE == "sqlite":
+        if db_type == "sqlite":
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
             rows = cursor.fetchall()
             tables = [row[0] if isinstance(row, (list, tuple)) else row['name'] for row in rows]
@@ -806,15 +815,15 @@ async def get_database_status():
         
         db_info = {
             "connected": True,
-            "database_type": DB_TYPE,
+            "database_type": db_type,
             "tables": tables,
             "table_counts": table_counts,
             "total_tables": len(tables)
         }
-        
-        if DB_TYPE == "sqlite":
-            db_info["path"] = SQLITE_PATH
-            db_info["file_exists"] = Path(SQLITE_PATH).exists()
+
+        if db_type == "sqlite":
+            db_info["path"] = sqlite_path
+            db_info["file_exists"] = Path(sqlite_path).exists()
         
         return db_info
         
@@ -824,6 +833,6 @@ async def get_database_status():
         print(f"Database status check failed: {error_detail}")  # 打印到服务器日志
         return {
             "connected": False,
-            "database_type": DB_TYPE if 'DB_TYPE' in dir() else 'unknown',
+            "database_type": db_type,
             "error": str(e)
         }

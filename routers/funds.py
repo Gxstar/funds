@@ -13,13 +13,11 @@ class FundCreate(BaseModel):
     fund_code: str
     fund_name: Optional[str] = None
     fund_type: Optional[str] = None
-    risk_level: Optional[str] = None
 
 
 class FundUpdate(BaseModel):
     fund_name: Optional[str] = None
     fund_type: Optional[str] = None
-    risk_level: Optional[str] = None
     related_etf: Optional[str] = None
 
 
@@ -57,8 +55,7 @@ async def add_fund(fund: FundCreate):
         result = FundService.add_fund(
             fund.fund_code,
             fund.fund_name,
-            fund.fund_type,
-            fund.risk_level
+            fund.fund_type
         )
         
         # 后台同步历史数据
@@ -89,6 +86,35 @@ async def delete_fund(fund_code: str):
     if not success:
         raise HTTPException(status_code=404, detail="基金不存在")
     return {"message": "删除成功"}
+
+
+@router.post("/{fund_code}/refresh-info")
+async def refresh_fund_info(fund_code: str):
+    """刷新基金信息（从 AkShare 获取最新数据）"""
+    fund = FundService.get_fund_by_code(fund_code)
+    if not fund:
+        raise HTTPException(status_code=404, detail="基金不存在")
+
+    try:
+        info = await MarketService.fetch_fund_info_from_akshare(fund_code)
+        if not info:
+            raise HTTPException(status_code=400, detail="无法从 AkShare 获取基金信息")
+        
+        # 更新基金信息
+        updates = {}
+        if info.get("fund_name"):
+            updates["fund_name"] = info["fund_name"]
+        if info.get("fund_type"):
+            updates["fund_type"] = info["fund_type"]
+
+        if updates:
+            result = FundService.update_fund(fund_code, **updates)
+            return {"message": "基金信息已更新", "data": result}
+        else:
+            return {"message": "没有可更新的信息"}
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"刷新基金信息失败: {str(e)}")
 
 
 @router.get("/search/{keyword}")

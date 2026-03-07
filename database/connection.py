@@ -26,9 +26,15 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
 def get_db():
     """获取数据库连接（支持 SQLite 和 PostgreSQL）"""
-    if DB_TYPE == "sqlite":
+    # 每次调用时重新读取环境变量，确保配置更新后无需重启服务
+    db_type = os.getenv("DB_TYPE", "postgresql").lower()
+    
+    if db_type == "sqlite":
+        # 从环境变量读取配置（确保使用最新值）
+        sqlite_path = os.getenv("SQLITE_PATH", "data/funds.db")
+        
         # 确保目录存在
-        db_path = Path(SQLITE_PATH)
+        db_path = Path(sqlite_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         
         conn = sqlite3.connect(str(db_path))
@@ -41,12 +47,19 @@ def get_db():
         import psycopg2
         from psycopg2.extras import RealDictCursor
         
+        # 从环境变量读取配置（确保使用最新值）
+        pg_host = os.getenv("DB_HOST", "localhost")
+        pg_port = os.getenv("DB_PORT", "5432")
+        pg_name = os.getenv("DB_NAME", "funds")
+        pg_user = os.getenv("DB_USER", "postgres")
+        pg_password = os.getenv("DB_PASSWORD", "")
+        
         conn = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD,
+            host=pg_host,
+            port=pg_port,
+            dbname=pg_name,
+            user=pg_user,
+            password=pg_password,
             cursor_factory=RealDictCursor
         )
         # 设置客户端编码
@@ -70,10 +83,13 @@ def get_db_context() -> Generator:
 
 def init_db() -> None:
     """初始化数据库表结构（支持 SQLite 和 PostgreSQL）"""
+    # 重新读取环境变量
+    db_type = os.getenv("DB_TYPE", "postgresql").lower()
+    
     with get_db_context() as conn:
         cursor = conn.cursor()
         
-        is_sqlite = DB_TYPE == "sqlite"
+        is_sqlite = db_type == "sqlite"
         
         # 根据数据库类型选择 SQL 语法
         if is_sqlite:
@@ -98,7 +114,6 @@ def init_db() -> None:
                 fund_code VARCHAR(6) {unique_constraint} NOT NULL,
                 fund_name VARCHAR(100) NOT NULL,
                 fund_type VARCHAR(50),
-                risk_level VARCHAR(10),
                 related_etf VARCHAR(20),
                 last_price_date DATE,
                 last_net_value {decimal_type},

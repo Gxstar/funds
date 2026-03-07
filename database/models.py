@@ -12,14 +12,13 @@ class Fund:
     fund_code: str = ""
     fund_name: str = ""
     fund_type: Optional[str] = None
-    risk_level: Optional[str] = None
     related_etf: Optional[str] = None
     last_price_date: Optional[date] = None
     last_net_value: Optional[Decimal] = None
     last_growth_rate: Optional[Decimal] = None
     info_updated_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
-    
+
     @classmethod
     def from_row(cls, row: dict) -> "Fund":
         return cls(
@@ -27,7 +26,6 @@ class Fund:
             fund_code=row.get("fund_code", ""),
             fund_name=row.get("fund_name", ""),
             fund_type=row.get("fund_type"),
-            risk_level=row.get("risk_level"),
             related_etf=row.get("related_etf"),
             last_price_date=row.get("last_price_date"),
             last_net_value=Decimal(str(row["last_net_value"])) if row.get("last_net_value") else None,

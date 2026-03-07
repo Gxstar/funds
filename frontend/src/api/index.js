@@ -33,6 +33,7 @@ export const fundAPI = {
   update: (code, data) => request(`${API_BASE}/funds/${code}`, { method: 'PUT', body: data }),
   delete: (code) => request(`${API_BASE}/funds/${code}`, { method: 'DELETE' }),
   search: (keyword) => request(`${API_BASE}/funds/search/${encodeURIComponent(keyword)}`),
+  refreshInfo: (code) => request(`${API_BASE}/funds/${code}/refresh-info`, { method: 'POST' }),
 }
 
 // 持仓相关 API

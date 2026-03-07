@@ -137,11 +137,14 @@ class MarketService:
             
             if not result.empty:
                 row = result.iloc[0]
-                return {
+                fund_info = {
                     "fund_code": fund_code,
                     "fund_name": row.get("基金简称", ""),
                     "fund_type": row.get("基金类型", None),
+                    "risk_level": None,
                 }
+                
+                return fund_info
             
             return None
         except Exception as e:

@@ -420,10 +420,7 @@ onUnmounted(() => {
             {{ fund?.last_growth_rate ? formatPercent(fund.last_growth_rate) : '-' }}
           </div>
         </div>
-        <div class="stat-item">
-          <div class="stat-label">风险等级</div>
-          <div class="stat-value">{{ fund?.risk_level || '-' }}</div>
-        </div>
+
         <div class="stat-item">
           <div class="stat-label">关联ETF</div>
           <div class="stat-value">
@@ -757,7 +754,7 @@ onUnmounted(() => {
 
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 24px;
 }
 

@@ -299,6 +299,16 @@ export const useFundStore = defineStore('fund', () => {
   async function refreshAll() {
     try {
       await marketAPI.syncAll()
+      
+      // 同时刷新所有基金的基本信息（包括风险等级）
+      for (const fund of funds.value) {
+        try {
+          await fundAPI.refreshInfo(fund.fund_code)
+        } catch (e) {
+          console.log(`刷新基金 ${fund.fund_code} 信息失败:`, e)
+        }
+      }
+      
       await loadFunds()
       await loadHoldingsSummary()
       if (currentFund.value) {

@@ -45,23 +45,21 @@ class FundService:
     def add_fund(
         fund_code: str,
         fund_name: str,
-        fund_type: Optional[str] = None,
-        risk_level: Optional[str] = None
+        fund_type: Optional[str] = None
     ) -> dict:
         """添加基金"""
         with get_db_context() as conn:
             cursor = conn.cursor()
             try:
                 cursor.execute("""
-                    INSERT INTO funds (fund_code, fund_name, fund_type, risk_level)
-                    VALUES (%s, %s, %s, %s)
-                """, (fund_code, fund_name, fund_type, risk_level))
+                    INSERT INTO funds (fund_code, fund_name, fund_type)
+                    VALUES (%s, %s, %s)
+                """, (fund_code, fund_name, fund_type))
                 
                 return {
                     "fund_code": fund_code,
                     "fund_name": fund_name,
-                    "fund_type": fund_type,
-                    "risk_level": risk_level
+                    "fund_type": fund_type
                 }
             except Exception as e:
                 if "unique" in str(e).lower() or "duplicate" in str(e).lower():
@@ -71,7 +69,7 @@ class FundService:
     @staticmethod
     def update_fund(fund_code: str, **kwargs) -> Optional[dict]:
         """更新基金信息"""
-        allowed_fields = ["fund_name", "fund_type", "risk_level", "related_etf", 
+        allowed_fields = ["fund_name", "fund_type", "related_etf", 
                          "last_price_date", "last_net_value", "last_growth_rate"]
         updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
         
