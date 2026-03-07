@@ -76,17 +76,49 @@ class AICache:
                 created_at = row.get("created_at")
                 age = None
                 if created_at:
-                    age = datetime.now() - created_at
-                    # max_age_hours = 0 表示缓存永不过期
-                    if max_age_hours > 0 and age > timedelta(hours=max_age_hours):
-                        logger.info(f"AI缓存已过期: {fund_code}, 年龄: {age}")
-                        return None
+                    # 处理 SQLite 返回的字符串格式时间
+                    if isinstance(created_at, str):
+                        try:
+                            created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        except ValueError:
+                            try:
+                                created_at = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
+                            except ValueError:
+                                created_at = None
+                    
+                    if created_at:
+                        # 统一时区处理：如果 created_at 有时区，转换为本地时间
+                        now = datetime.now()
+                        if created_at.tzinfo is not None:
+                            # created_at 带时区，转换为本地时间（去掉时区）
+                            created_at = created_at.replace(tzinfo=None)
+                        age = now - created_at
+                        # max_age_hours = 0 表示缓存永不过期
+                        if max_age_hours > 0 and age > timedelta(hours=max_age_hours):
+                            logger.info(f"AI缓存已过期: {fund_code}, 年龄: {age}")
+                            return None
+                
+                # 处理 SQLite 中的 JSON 字符串
+                indicators = row.get("indicators")
+                risk_metrics = row.get("risk_metrics")
+                
+                if isinstance(indicators, str):
+                    try:
+                        indicators = json.loads(indicators)
+                    except json.JSONDecodeError:
+                        indicators = None
+                
+                if isinstance(risk_metrics, str):
+                    try:
+                        risk_metrics = json.loads(risk_metrics)
+                    except json.JSONDecodeError:
+                        risk_metrics = None
                 
                 return {
                     "id": row.get("id"),
                     "analysis": row.get("analysis"),
-                    "indicators": row.get("indicators"),
-                    "risk_metrics": row.get("risk_metrics"),
+                    "indicators": indicators,
+                    "risk_metrics": risk_metrics,
                     "timestamp": created_at.isoformat() if created_at else None,
                     "cached": True,
                     "age_hours": age.total_seconds() / 3600 if age else None
@@ -99,27 +131,54 @@ class AICache:
     def save_cache(fund_code: str, analysis: str, analysis_type: str = "fund", 
                    indicators: dict = None, risk_metrics: dict = None) -> None:
         """保存分析结果到缓存（始终只保存最新的一条）"""
+        import traceback
+        conn = None
         try:
+            from database.connection import get_db
             now = datetime.now()
             
-            with get_db_context() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO ai_analysis (fund_code, analysis_type, analysis, indicators, risk_metrics, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (fund_code, analysis_type) 
-                    DO UPDATE SET 
-                        analysis = EXCLUDED.analysis,
-                        indicators = EXCLUDED.indicators,
-                        risk_metrics = EXCLUDED.risk_metrics,
-                        created_at = EXCLUDED.created_at
-                """, (fund_code, analysis_type, analysis, 
-                      json.dumps(indicators) if indicators else None,
-                      json.dumps(risk_metrics) if risk_metrics else None,
-                      now))
-                logger.info(f"已保存AI缓存: {fund_code}")
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO ai_analysis (fund_code, analysis_type, analysis, indicators, risk_metrics, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (fund_code, analysis_type) 
+                DO UPDATE SET 
+                    analysis = EXCLUDED.analysis,
+                    indicators = EXCLUDED.indicators,
+                    risk_metrics = EXCLUDED.risk_metrics,
+                    created_at = EXCLUDED.created_at
+            """, (fund_code, analysis_type, analysis, 
+                  json.dumps(indicators) if indicators else None,
+                  json.dumps(risk_metrics) if risk_metrics else None,
+                  now))
+            conn.commit()
+            
+            # 验证数据是否真的保存了
+            cursor.execute("""
+                SELECT id FROM ai_analysis WHERE fund_code = %s AND analysis_type = %s
+            """, (fund_code, analysis_type))
+            row = cursor.fetchone()
+            if row:
+                logger.info(f"已保存AI缓存并验证成功: {fund_code}, id={row.get('id')}")
+            else:
+                logger.error(f"保存AI缓存验证失败: {fund_code}，数据未写入")
+                raise Exception("数据保存验证失败")
         except Exception as e:
             logger.error(f"保存AI缓存失败: {e}")
+            logger.error(f"异常详情: {traceback.format_exc()}")
+            if conn:
+                try:
+                    conn.rollback()
+                except:
+                    pass
+            raise
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     @staticmethod
     def clear_cache(fund_code: str, analysis_type: str = "fund") -> None:
@@ -297,8 +356,8 @@ class AIService:
                 return {
                     "fund_code": fund_code,
                     "analysis": cache["analysis"],
-                    "indicators": cache.get("indicators", {}),
-                    "risk_metrics": cache.get("risk_metrics"),
+                    "indicators": cache.get("indicators") or {},
+                    "risk_metrics": cache.get("risk_metrics") or {},
                     "timestamp": cache["timestamp"],
                     "cached": True
                 }

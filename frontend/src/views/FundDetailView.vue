@@ -368,18 +368,17 @@ function renderMarkdown(text) {
 
 const emit = defineEmits(['delete-fund'])
 
-// 切换基金时清空AI分析结果
+// 加载基金数据（同时处理清空缓存和加载新数据）
 watch(() => route.params.code, (newCode, oldCode) => {
+  if (!newCode) return
+  
+  // 切换基金时先清空AI分析结果
   if (oldCode && newCode !== oldCode) {
     fundStore.clearAIAnalysis()
   }
-})
-
-// 加载基金数据
-watch(() => route.params.code, (code) => {
-  if (code) {
-    loadFundData()
-  }
+  
+  // 然后加载新数据
+  loadFundData()
 }, { immediate: true })
 
 onMounted(() => {
@@ -510,77 +509,60 @@ onUnmounted(() => {
       </el-col>
     </el-row>
 
-    <!-- 净值走势 -->
-    <div class="info-card">
-      <div class="info-header">
-        <span class="section-title">净值走势</span>
-        <el-radio-group v-model="period" size="small" @change="changePeriod">
-          <el-radio-button value="3m">3月</el-radio-button>
-          <el-radio-button value="6m">6月</el-radio-button>
-          <el-radio-button value="1y">1年</el-radio-button>
-          <el-radio-button value="3y">3年</el-radio-button>
-          <el-radio-button value="5y">5年</el-radio-button>
-          <el-radio-button value="all">全部</el-radio-button>
-        </el-radio-group>
-      </div>
-      <div ref="chartRef" class="chart-container"></div>
-    </div>
+    <!-- 净值走势和AI建议 -->
+    <el-row :gutter="24">
+      <el-col :span="12">
+        <div class="info-card">
+          <div class="info-header">
+            <span class="section-title">净值走势</span>
+            <el-radio-group v-model="period" size="small" @change="changePeriod">
+              <el-radio-button value="3m">3月</el-radio-button>
+              <el-radio-button value="6m">6月</el-radio-button>
+              <el-radio-button value="1y">1年</el-radio-button>
+              <el-radio-button value="3y">3年</el-radio-button>
+              <el-radio-button value="5y">5年</el-radio-button>
+              <el-radio-button value="all">全部</el-radio-button>
+            </el-radio-group>
+          </div>
+          <div ref="chartRef" class="chart-container"></div>
+        </div>
+      </el-col>
 
-    <!-- AI 建议 -->
-    <div class="info-card">
-      <div class="info-header">
-        <span class="section-title">AI 建议</span>
-        <el-space>
-          <el-tag v-if="fundStore.aiAnalysis?.cached" type="success" size="small">缓存</el-tag>
-          <el-button 
-            v-if="fundStore.aiAnalysis" 
-            size="small" 
-            :loading="fundStore.aiLoading" 
-            @click="getAIAnalysis(true)"
-          >
-            刷新分析
-          </el-button>
-          <el-button 
-            v-else 
-            type="primary" 
-            size="small" 
-            :loading="fundStore.aiLoading" 
-            @click="getAIAnalysis(true)"
-          >
-            开始分析
-          </el-button>
-        </el-space>
-      </div>
-      <div class="indicators-row">
-        <div class="indicator-tag">
-          <span class="indicator-label">MA5</span>
-          <span class="indicator-value">{{ fundStore.aiAnalysis?.indicators?.ma5 || '-' }}</span>
+      <el-col :span="12">
+        <div class="info-card">
+          <div class="info-header">
+            <span class="section-title">AI 建议</span>
+            <el-space>
+              <el-tag v-if="fundStore.aiAnalysis?.cached" type="success" size="small">缓存</el-tag>
+              <el-button 
+                v-if="fundStore.aiAnalysis" 
+                size="small" 
+                :loading="fundStore.aiLoading" 
+                @click="getAIAnalysis(true)"
+              >
+                刷新分析
+              </el-button>
+              <el-button 
+                v-else 
+                type="primary" 
+                size="small" 
+                :loading="fundStore.aiLoading" 
+                @click="getAIAnalysis(true)"
+              >
+                开始分析
+              </el-button>
+            </el-space>
+          </div>
+          <el-scrollbar v-if="fundStore.aiAnalysis" height="350px" class="ai-result">
+            <div v-if="fundStore.aiAnalysis.timestamp" class="ai-time">
+              分析时间: {{ new Date(fundStore.aiAnalysis.timestamp).toLocaleString('zh-CN') }}
+            </div>
+            <div class="markdown-body" v-html="renderMarkdown(fundStore.aiAnalysis.analysis)"></div>
+          </el-scrollbar>
+          <el-empty v-else description="点击分析按钮获取 AI 建议" :image-size="50" />
         </div>
-        <div class="indicator-tag">
-          <span class="indicator-label">MA10</span>
-          <span class="indicator-value">{{ fundStore.aiAnalysis?.indicators?.ma10 || '-' }}</span>
-        </div>
-        <div class="indicator-tag">
-          <span class="indicator-label">MA20</span>
-          <span class="indicator-value">{{ fundStore.aiAnalysis?.indicators?.ma20 || '-' }}</span>
-        </div>
-        <div class="indicator-tag">
-          <span class="indicator-label">RSI</span>
-          <span class="indicator-value">{{ fundStore.aiAnalysis?.indicators?.rsi || '-' }}</span>
-        </div>
-        <div class="indicator-tag">
-          <span class="indicator-label">MACD</span>
-          <span class="indicator-value">{{ fundStore.aiAnalysis?.indicators?.macd || '-' }}</span>
-        </div>
-      </div>
-      <el-scrollbar v-if="fundStore.aiAnalysis" height="500px" class="ai-result">
-        <div v-if="fundStore.aiAnalysis.timestamp" class="ai-time">
-          分析时间: {{ new Date(fundStore.aiAnalysis.timestamp).toLocaleString('zh-CN') }}
-        </div>
-        <div class="markdown-body" v-html="renderMarkdown(fundStore.aiAnalysis.analysis)"></div>
-      </el-scrollbar>
-      <el-empty v-else description="点击分析按钮获取 AI 建议" :image-size="50" />
-    </div>
+      </el-col>
+    </el-row>
 
     <!-- 交易弹窗 -->
     <el-dialog v-model="tradeDialogVisible" :title="tradeType === 'BUY' ? '买入' : '卖出'" width="450px">

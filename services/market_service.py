@@ -257,10 +257,6 @@ class MarketService:
                 # 更新同步状态
                 MarketService.update_cache_meta(fund_code, "synced", today)
                 
-                # 同步成功后清除 AI 缓存
-                from services.ai_service import AICache
-                AICache.clear_cache(fund_code, "fund")
-                
                 return {
                     "fund_code": fund_code,
                     "status": "success",
