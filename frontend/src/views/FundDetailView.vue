@@ -418,7 +418,7 @@ onUnmounted(() => {
         <div class="stat-item" :class="{ profit: fund?.last_growth_rate > 0, loss: fund?.last_growth_rate < 0 }">
           <div class="stat-label">日涨跌幅</div>
           <div class="stat-value">
-            {{ fund?.last_growth_rate ? (fund.last_growth_rate > 0 ? '+' : '') + formatPercent(fund.last_growth_rate) : '-' }}
+            {{ fund?.last_growth_rate ? formatPercent(fund.last_growth_rate) : '-' }}
           </div>
         </div>
         <div class="stat-item">

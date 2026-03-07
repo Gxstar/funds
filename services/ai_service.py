@@ -77,6 +77,7 @@ class AICache:
                 age = None
                 if created_at:
                     age = datetime.now() - created_at
+                    # max_age_hours = 0 表示缓存永不过期
                     if max_age_hours > 0 and age > timedelta(hours=max_age_hours):
                         logger.info(f"AI缓存已过期: {fund_code}, 年龄: {age}")
                         return None
@@ -134,8 +135,8 @@ class AICache:
     
     @staticmethod
     def is_cache_valid(fund_code: str, analysis_type: str = "fund") -> bool:
-        """检查缓存是否存在"""
-        cache = AICache.get_cache(fund_code, analysis_type)
+        """检查缓存是否存在 (max_age_hours=0 表示永不过期)"""
+        cache = AICache.get_cache(fund_code, analysis_type, max_age_hours=0)
         return cache is not None
 
 
@@ -288,9 +289,9 @@ class AIService:
             force_refresh: 是否强制刷新缓存（重新分析）
             cache_only: 只获取缓存，没有缓存时返回空
         """
-        # 如果不是强制刷新，先尝试获取缓存
+        # 如果不是强制刷新，先尝试获取缓存 (max_age_hours=0 表示永不过期)
         if not force_refresh:
-            cache = AICache.get_cache(fund_code, "fund")
+            cache = AICache.get_cache(fund_code, "fund", max_age_hours=0)
             if cache:
                 logger.info(f"使用缓存的AI分析: {fund_code}")
                 return {
@@ -592,9 +593,9 @@ class AIService:
         from services.fund_service import FundService
         from services.market_service import MarketService
         
-        # 如果不是强制刷新，先尝试获取缓存
+        # 如果不是强制刷新，先尝试获取缓存 (max_age_hours=0 表示永不过期)
         if not force_refresh:
-            cache = AICache.get_cache("portfolio", "portfolio")
+            cache = AICache.get_cache("portfolio", "portfolio", max_age_hours=0)
             if cache:
                 logger.info("使用缓存的持仓分析")
                 return {
