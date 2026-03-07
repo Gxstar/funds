@@ -37,6 +37,9 @@ const dbConfig = ref({
 })
 
 const dbStatus = ref(null)
+const dbConnectionStatus = ref(null)
+const testingConnection = ref(false)
+const initializingDb = ref(false)
 
 // 提示词设置
 const promptType = ref('fund')
@@ -76,10 +79,11 @@ const portfolioVariables = [
 // 加载设置
 async function loadSettings() {
   try {
-    const [settings, dbResult, promptsResult] = await Promise.all([
+    const [settings, dbResult, promptsResult, dbConnResult] = await Promise.all([
       aiAPI.getSettings(),
       settingsAPI.getDatabaseConfig(),
-      settingsAPI.getPrompts()
+      settingsAPI.getPrompts(),
+      settingsAPI.getDatabaseStatus().catch(() => null)
     ])
     
     // 加载通用设置
@@ -104,6 +108,9 @@ async function loadSettings() {
       dbConfig.value.pg_password = ''
       dbStatus.value = dbResult
     }
+    
+    // 加载数据库连接状态
+    dbConnectionStatus.value = dbConnResult
     
     // 正确处理提示词数据结构
     if (promptsResult && promptsResult.prompts) {
@@ -138,7 +145,19 @@ async function saveAllSettings() {
     }
     await settingsAPI.updatePrompts(promptsData)
     
-    ElMessage.success('设置已保存')
+    // 保存数据库配置
+    const dbData = {
+      db_type: dbConfig.value.type,
+      sqlite_path: dbConfig.value.sqlite_path,
+      pg_host: dbConfig.value.pg_host,
+      pg_port: dbConfig.value.pg_port,
+      pg_name: dbConfig.value.pg_name,
+      pg_user: dbConfig.value.pg_user,
+      pg_password: dbConfig.value.pg_password  // 如果为空，后端会保留原密码
+    }
+    await settingsAPI.updateDatabaseConfig(dbData)
+    
+    ElMessage.success('设置已保存，重启应用后生效')
     visible.value = false
     
     // 刷新设置
@@ -181,6 +200,83 @@ async function resetPrompts() {
   } catch (error) {
     ElMessage.error(error.message || '重置失败')
   }
+}
+
+// 测试数据库连接
+async function testDatabaseConnection() {
+  testingConnection.value = true
+  try {
+    const result = await settingsAPI.testDatabaseConnection({
+      db_type: dbConfig.value.type,
+      sqlite_path: dbConfig.value.sqlite_path,
+      pg_host: dbConfig.value.pg_host,
+      pg_port: dbConfig.value.pg_port,
+      pg_name: dbConfig.value.pg_name,
+      pg_user: dbConfig.value.pg_user,
+      pg_password: dbConfig.value.pg_password
+    })
+    
+    if (result.success) {
+      ElMessage.success(result.message)
+    } else {
+      ElMessage.error(result.message)
+    }
+  } catch (error) {
+    ElMessage.error(error.message || '测试失败')
+  } finally {
+    testingConnection.value = false
+  }
+}
+
+// 初始化数据库
+async function initializeDatabase() {
+  initializingDb.value = true
+  try {
+    const result = await settingsAPI.initializeDatabase({
+      db_type: dbConfig.value.type,
+      sqlite_path: dbConfig.value.sqlite_path,
+      pg_host: dbConfig.value.pg_host,
+      pg_port: dbConfig.value.pg_port,
+      pg_name: dbConfig.value.pg_name,
+      pg_user: dbConfig.value.pg_user,
+      pg_password: dbConfig.value.pg_password
+    })
+    
+    if (result.success) {
+      ElMessage.success(result.message)
+      // 刷新数据库状态
+      const status = await settingsAPI.getDatabaseStatus()
+      dbConnectionStatus.value = status
+    } else {
+      ElMessage.error(result.message || '初始化失败')
+    }
+  } catch (error) {
+    ElMessage.error(error.message || '初始化失败')
+  } finally {
+    initializingDb.value = false
+  }
+}
+
+// 选择 SQLite 文件（通过 input）
+function selectSQLiteFile() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.db,.sqlite,.sqlite3'
+  input.onchange = (e) => {
+    const file = e.target.files[0]
+    if (file) {
+      // 使用相对路径
+      dbConfig.value.sqlite_path = `./data/${file.name}`
+    }
+  }
+  input.click()
+}
+
+// 创建新的 SQLite 数据库
+function createNewSQLiteDb() {
+  const timestamp = new Date().toISOString().slice(0, 10)
+  dbConfig.value.sqlite_path = `./data/funds_${timestamp}.db`
+  ElMessage.success('已生成新数据库路径，点击"初始化数据库"创建')
 }
 
 // 复制提示词
@@ -239,21 +335,57 @@ watch(visible, (val) => {
 
       <!-- 数据库设置 -->
       <el-tab-pane label="💾 数据库设置">
-        <el-alert v-if="dbStatus" type="info" :closable="false" show-icon style="margin-bottom: 16px">
-          <template #title>当前使用: {{ dbStatus.type === 'sqlite' ? 'SQLite' : 'PostgreSQL' }}</template>
+        <!-- 数据库连接状态 -->
+        <el-alert 
+          v-if="dbConnectionStatus && dbConnectionStatus.connected" 
+          type="success"
+          :closable="false" 
+          show-icon 
+          style="margin-bottom: 16px"
+        >
+          <template #title>
+            ✅ 数据库已连接
+            <span style="margin-left: 8px; font-size: 12px; color: #909399;">
+              ({{ dbConnectionStatus.total_tables || 0 }} 张表)
+            </span>
+          </template>
+          <template v-if="dbConnectionStatus.database_type === 'sqlite'">
+            路径: {{ dbConnectionStatus.path }}
+          </template>
         </el-alert>
+        
+        <el-alert 
+          v-else-if="dbConnectionStatus && !dbConnectionStatus.connected" 
+          type="error"
+          :closable="false" 
+          show-icon 
+          style="margin-bottom: 16px"
+        >
+          <template #title>❌ 数据库连接失败</template>
+          <div style="font-size: 12px; margin-top: 4px;">{{ dbConnectionStatus.error || '无法连接到数据库' }}</div>
+        </el-alert>
+        
         <el-form label-width="100px">
           <el-form-item label="数据库类型">
             <el-radio-group v-model="dbConfig.type">
-              <el-radio value="sqlite">SQLite（本地）</el-radio>
-              <el-radio value="postgresql">PostgreSQL（云端）</el-radio>
+              <el-radio value="sqlite">SQLite（本地文件）</el-radio>
+              <el-radio value="postgresql">PostgreSQL（服务器）</el-radio>
             </el-radio-group>
           </el-form-item>
+          
+          <!-- SQLite 配置 -->
           <template v-if="dbConfig.type === 'sqlite'">
             <el-form-item label="数据文件">
-              <el-input v-model="dbConfig.sqlite_path" placeholder="./data/funds.db" />
+              <div style="display: flex; gap: 8px;">
+                <el-input v-model="dbConfig.sqlite_path" placeholder="./data/funds.db" style="flex: 1;" />
+                <el-button @click="selectSQLiteFile">📁 选择</el-button>
+                <el-button @click="createNewSQLiteDb">➕ 新建</el-button>
+              </div>
+              <div class="form-hint">支持 .db、.sqlite、.sqlite3 文件格式</div>
             </el-form-item>
           </template>
+          
+          <!-- PostgreSQL 配置 -->
           <template v-else>
             <el-form-item label="主机">
               <el-input v-model="dbConfig.pg_host" placeholder="localhost" />
@@ -268,13 +400,35 @@ watch(visible, (val) => {
               <el-input v-model="dbConfig.pg_user" placeholder="postgres" />
             </el-form-item>
             <el-form-item label="密码">
-              <el-input v-model="dbConfig.pg_password" type="password" show-password placeholder="输入新密码以修改" />
+              <el-input v-model="dbConfig.pg_password" type="password" show-password placeholder="留空使用已保存的密码" />
+              <div class="form-hint">如需修改密码请输入新密码，否则保持为空</div>
             </el-form-item>
           </template>
         </el-form>
+        
+        <!-- 操作按钮 -->
+        <div style="display: flex; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e4e7ed;">
+          <el-button 
+            type="primary" 
+            plain 
+            @click="testDatabaseConnection"
+            :loading="testingConnection"
+          >
+            🔌 测试连接
+          </el-button>
+          <el-button 
+            type="success" 
+            plain 
+            @click="initializeDatabase"
+            :loading="initializingDb"
+          >
+            🗄️ 初始化表结构
+          </el-button>
+        </div>
+        
         <el-alert type="warning" :closable="false" style="margin-top: 16px">
-          <template #title>注意</template>
-          数据库配置需要修改 .env 文件并重启服务才能生效
+          <template #title>⚠️ 注意</template>
+          修改数据库配置后需要点击"保存设置"并重启应用才能生效
         </el-alert>
       </el-tab-pane>
 

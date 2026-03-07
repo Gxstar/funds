@@ -27,6 +27,7 @@ const indicesData = ref([])
 const indicesLoading = ref(false)
 const indicesDate = ref('')
 const indicesIsToday = ref(true)
+const indicesUpdateTime = ref('')
 
 // 指数选择对话框
 const showIndicesDialog = ref(false)
@@ -179,18 +180,24 @@ function updateChart() {
 }
 
 // 加载市场指数
-async function loadIndices() {
+async function loadIndices(skipCache = false) {
   indicesLoading.value = true
   try {
-    const result = await marketAPI.getIndices()
+    const result = await marketAPI.getIndices(skipCache)
     indicesData.value = result.data || []
     indicesDate.value = result.date || ''
     indicesIsToday.value = result.is_today !== false
+    indicesUpdateTime.value = result.update_time || ''
   } catch (error) {
     console.error('加载市场指数失败:', error)
   } finally {
     indicesLoading.value = false
   }
+}
+
+// 刷新市场指数（强制获取最新数据）
+async function refreshIndices() {
+  await loadIndices(true)
 }
 
 // 打开指数选择对话框
@@ -317,7 +324,7 @@ onUnmounted(() => {
     <!-- 顶部统计卡片 -->
     <div class="stats-row">
       <div class="stat-card">
-        <div class="stat-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+        <div class="stat-icon" style="background: linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%);">
           <el-icon><Wallet /></el-icon>
         </div>
         <div class="stat-content">
@@ -327,7 +334,7 @@ onUnmounted(() => {
       </div>
       
       <div class="stat-card">
-        <div class="stat-icon" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);">
+        <div class="stat-icon" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%);">
           <el-icon><TrendCharts /></el-icon>
         </div>
         <div class="stat-content">
@@ -349,7 +356,7 @@ onUnmounted(() => {
       </div>
       
       <div class="stat-card" :class="{ profit: fundStore.holdingsSummary.total_profit > 0, loss: fundStore.holdingsSummary.total_profit < 0 }">
-        <div class="stat-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+        <div class="stat-icon" style="background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);">
           <el-icon><DataLine /></el-icon>
         </div>
         <div class="stat-content">
@@ -362,7 +369,7 @@ onUnmounted(() => {
       </div>
       
       <div class="stat-card">
-        <div class="stat-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+        <div class="stat-icon" style="background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);">
           <el-icon><PieChart /></el-icon>
         </div>
         <div class="stat-content">
@@ -375,25 +382,25 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 操作按钮 -->
-    <div class="action-bar">
-      <el-button type="primary" size="large" @click="openAnalysisDialog" :loading="portfolioLoading">
-        <el-icon><MagicStick /></el-icon>
-        AI 持仓分析
-      </el-button>
-    </div>
-
     <!-- 数据卡片 -->
-    <el-row :gutter="20">
+    <el-row :gutter="24">
       <!-- 市场概况 -->
       <el-col :span="12">
         <div class="data-card">
           <div class="card-header">
             <span class="title">市场概况</span>
             <div class="header-actions">
+              <span class="update-time" v-if="indicesUpdateTime">
+                {{ formatDateTime(indicesUpdateTime) }}
+              </span>
               <el-tag size="small" :type="indicesIsToday ? 'success' : 'info'" v-if="indicesData.length">
                 {{ indicesIsToday ? '今日' : formatDate(indicesDate) }}
               </el-tag>
+              <el-tooltip content="刷新数据" placement="top">
+                <el-button size="small" circle @click="refreshIndices" :loading="indicesLoading">
+                  <el-icon><Refresh /></el-icon>
+                </el-button>
+              </el-tooltip>
               <el-tooltip content="选择指数" placement="top">
                 <el-button size="small" circle @click="openIndicesDialog">
                   <el-icon><Setting /></el-icon>
@@ -629,24 +636,24 @@ onUnmounted(() => {
 .stats-row {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 24px;
+  margin-bottom: 24px;
 }
 
 .stat-card {
   background: #fff;
-  border-radius: 12px;
-  padding: 20px;
+  border-radius: 16px;
+  padding: 24px 20px;
   display: flex;
   align-items: center;
   gap: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 6px 20px rgba(0, 0, 0, 0.04);
   transition: all 0.3s;
 }
 
 .stat-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
 }
 
 .stat-icon {
@@ -692,67 +699,117 @@ onUnmounted(() => {
 }
 
 .stat-card.highlight {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #fff;
+  border: 2px solid #e0f2fe;
 }
 
 .stat-card.highlight .stat-label,
 .stat-card.highlight .stat-hint {
-  color: rgba(255, 255, 255, 0.8);
+  color: #64748b;
 }
 
 .stat-card.highlight .stat-value {
-  color: #fff;
+  color: #1e293b;
 }
 
 .stat-card.highlight .stat-icon {
-  background: rgba(255, 255, 255, 0.2);
+  background: linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%);
 }
 
+.stat-card.highlight.profit .stat-value,
 .stat-card.highlight.profit .stat-sub {
-  color: #ff9999;
+  color: #dc2626;
 }
 
+.stat-card.highlight.loss .stat-value,
 .stat-card.highlight.loss .stat-sub {
-  color: #99ffcc;
+  color: #16a34a;
+}
+
+/* 总盈亏卡片涨跌颜色 */
+.stat-card.profit .stat-value {
+  color: #dc2626;
+}
+
+.stat-card.loss .stat-value {
+  color: #16a34a;
 }
 
 /* 操作按钮 */
 .action-bar {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
   display: flex;
   justify-content: flex-end;
+}
+
+.action-bar .el-button--primary {
+  background: #1890ff;
+  border: none;
+  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.2);
+  transition: all 0.3s;
+  font-weight: 500;
+}
+
+.action-bar .el-button--primary:hover {
+  background: #40a9ff;
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.action-bar .el-button--primary:active {
+  transform: translateY(0);
 }
 
 /* 数据卡片 */
 .data-card {
   background: #fff;
-  border-radius: 12px;
-  margin-bottom: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border-radius: 16px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 6px 20px rgba(0, 0, 0, 0.04);
   overflow: hidden;
+  transition: all 0.3s;
+}
+
+.data-card:hover {
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
 }
 
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 20px 24px;
   border-bottom: 1px solid #f0f0f0;
 }
 
 .card-header .title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: #1a1a2e;
 }
 
 .card-header .header-stats {
   display: flex;
-  gap: 6px;
+  gap: 8px;
+}
+
+.card-header .el-button.is-circle {
+  background: #fff;
+  border: 1px solid #e8eaed;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s;
+}
+
+.card-header .el-button.is-circle:hover {
+  background: #f0f7ff;
+  border-color: #1890ff;
+  color: #1890ff;
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.15);
+  transform: translateY(-1px);
 }
 
 .card-body {
-  padding: 16px 20px;
+  padding: 20px 24px;
 }
 
 .chart-container {
@@ -773,53 +830,93 @@ onUnmounted(() => {
 .index-item {
   text-align: center;
   padding: 12px 8px;
-  background: #f5f7fa;
-  border-radius: 8px;
+  background: #fff;
+  border-radius: 10px;
   transition: all 0.2s;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  border: 1px solid #f1f5f9;
+  position: relative;
+  overflow: hidden;
 }
 
-.index-item.up {
-  background: #fef0f0;
+.index-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #94a3b8;
 }
 
-.index-item.down {
-  background: #f0f9eb;
+.index-item.up::before {
+  background: #dc2626;
+}
+
+.index-item.down::before {
+  background: #16a34a;
+}
+
+.index-item:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
 }
 
 .index-name {
   font-size: 12px;
-  color: #909399;
-  margin-bottom: 4px;
+  color: #64748b;
+  margin-bottom: 6px;
+  font-weight: 500;
 }
 
 .index-price {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
-  color: #1a1a2e;
-  margin-bottom: 4px;
+  color: #1e293b;
+  margin-bottom: 6px;
 }
 
 .index-change {
   font-size: 12px;
-  color: #909399;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
-.index-item.up .index-price,
+.index-item.up .index-price {
+  color: #dc2626;
+}
+
+.index-item.down .index-price {
+  color: #16a34a;
+}
+
 .index-item.up .index-change {
-  color: #f56c6c;
+  color: #dc2626;
 }
 
-.index-item.down .index-price,
 .index-item.down .index-change {
-  color: #67c23a;
+  color: #16a34a;
 }
 
 .change-pct {
-  margin-left: 4px;
   font-weight: 600;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.index-item.up .change-pct {
+  background: rgba(220, 38, 38, 0.1);
+}
+
+.index-item.down .change-pct {
+  background: rgba(22, 163, 74, 0.1);
 }
 
 /* 列表容器 */
@@ -908,22 +1005,22 @@ onUnmounted(() => {
 }
 
 .today-change.positive {
-  color: #f56c6c;
-  background: #fef0f0;
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.1);
 }
 
 .today-change.negative {
-  color: #67c23a;
-  background: #f0f9eb;
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.1);
 }
 
 .amount.buy {
-  color: #f56c6c;
+  color: #dc2626;
   font-weight: 600;
 }
 
 .amount.sell {
-  color: #67c23a;
+  color: #16a34a;
   font-weight: 600;
 }
 
@@ -943,9 +1040,10 @@ onUnmounted(() => {
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   margin-bottom: 20px;
-  background: #f5f7fa;
+  background: #f8fafc;
   padding: 16px;
-  border-radius: 8px;
+  border-radius: 12px;
+  border: 1px solid #f1f5f9;
 }
 
 .analysis-summary .summary-item {
@@ -1000,11 +1098,11 @@ onUnmounted(() => {
 }
 
 .positive {
-  color: #f56c6c;
+  color: #dc2626;
 }
 
 .negative {
-  color: #67c23a;
+  color: #16a34a;
 }
 
 /* 卡片头部操作按钮 */
@@ -1012,6 +1110,11 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.update-time {
+  font-size: 12px;
+  color: #909399;
 }
 
 /* 指数选择对话框 */

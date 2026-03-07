@@ -464,6 +464,9 @@ async def update_database_config(config: DatabaseConfigUpdate):
         if config.db_type.lower() == "sqlite":
             if config.sqlite_path:
                 env_vars["SQLITE_PATH"] = config.sqlite_path
+            # 清除 PostgreSQL 配置
+            for key in ["DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"]:
+                env_vars.pop(key, None)
         else:
             if config.pg_host:
                 env_vars["DB_HOST"] = config.pg_host
@@ -473,8 +476,11 @@ async def update_database_config(config: DatabaseConfigUpdate):
                 env_vars["DB_NAME"] = config.pg_name
             if config.pg_user:
                 env_vars["DB_USER"] = config.pg_user
+            # 只有当提供了新密码时才更新，否则保留原有密码
             if config.pg_password:
                 env_vars["DB_PASSWORD"] = config.pg_password
+            # 清除 SQLite 配置
+            env_vars.pop("SQLITE_PATH", None)
         
         # 写入 .env 文件
         lines = ["# 数据库配置", ""]
@@ -507,3 +513,317 @@ async def update_database_config(config: DatabaseConfigUpdate):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"保存失败: {str(e)}")
+
+
+# ==================== 数据库测试和初始化 API ====================
+
+class DatabaseTestRequest(BaseModel):
+    db_type: str
+    sqlite_path: Optional[str] = None
+    pg_host: Optional[str] = None
+    pg_port: Optional[str] = None
+    pg_name: Optional[str] = None
+    pg_user: Optional[str] = None
+    pg_password: Optional[str] = None
+
+
+@router.post("/database-test")
+async def test_database_connection(request: DatabaseTestRequest):
+    """测试数据库连接"""
+    import sqlite3
+    import psycopg2
+    from pathlib import Path
+    import os
+    
+    try:
+        if request.db_type.lower() == "sqlite":
+            # 测试 SQLite 连接
+            db_path = request.sqlite_path or "data/funds.db"
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            conn.close()
+            
+            return {
+                "success": True,
+                "message": "SQLite 连接成功",
+                "database_type": "sqlite",
+                "path": db_path
+            }
+        else:
+            # 测试 PostgreSQL 连接
+            # 如果前端传来的密码为空，使用当前环境变量中的密码
+            password = request.pg_password if request.pg_password else os.getenv("DB_PASSWORD", "")
+            
+            conn = psycopg2.connect(
+                host=request.pg_host or "localhost",
+                port=request.pg_port or "5432",
+                dbname=request.pg_name or "funds",
+                user=request.pg_user or "postgres",
+                password=password
+            )
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            conn.close()
+            
+            return {
+                "success": True,
+                "message": "PostgreSQL 连接成功",
+                "database_type": "postgresql"
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"连接失败: {str(e)}",
+            "database_type": request.db_type
+        }
+
+
+@router.post("/database-init")
+async def initialize_database(request: DatabaseTestRequest):
+    """初始化数据库表结构"""
+    import sqlite3
+    import psycopg2
+    from pathlib import Path
+    
+    try:
+        if request.db_type.lower() == "sqlite":
+            # 初始化 SQLite
+            db_path = request.sqlite_path or "data/funds.db"
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            
+            # 创建表结构
+            cursor.executescript("""
+                -- 基金基础信息表
+                CREATE TABLE IF NOT EXISTS funds (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fund_code VARCHAR(6) UNIQUE NOT NULL,
+                    fund_name VARCHAR(100) NOT NULL,
+                    fund_type VARCHAR(50),
+                    risk_level VARCHAR(10),
+                    related_etf VARCHAR(20),
+                    last_price_date DATE,
+                    last_net_value REAL,
+                    last_growth_rate REAL,
+                    info_updated_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                
+                -- 当前持仓表
+                CREATE TABLE IF NOT EXISTS holdings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fund_code VARCHAR(6) NOT NULL,
+                    total_shares REAL NOT NULL,
+                    cost_price REAL NOT NULL,
+                    total_cost REAL NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (fund_code) REFERENCES funds(fund_code) ON DELETE CASCADE
+                );
+                
+                -- 交易记录表
+                CREATE TABLE IF NOT EXISTS trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fund_code VARCHAR(6) NOT NULL,
+                    trade_type VARCHAR(4) NOT NULL,
+                    trade_date DATE NOT NULL,
+                    confirm_date DATE,
+                    confirm_shares REAL,
+                    confirm_net_value REAL,
+                    shares REAL,
+                    price REAL,
+                    amount REAL NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (fund_code) REFERENCES funds(fund_code) ON DELETE CASCADE
+                );
+                
+                -- 历史净值缓存表
+                CREATE TABLE IF NOT EXISTS prices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fund_code VARCHAR(6) NOT NULL,
+                    net_value REAL NOT NULL,
+                    accum_value REAL,
+                    date DATE NOT NULL,
+                    growth_rate REAL,
+                    UNIQUE(fund_code, date),
+                    FOREIGN KEY (fund_code) REFERENCES funds(fund_code) ON DELETE CASCADE
+                );
+                
+                -- 缓存元数据表
+                CREATE TABLE IF NOT EXISTS cache_meta (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fund_code VARCHAR(6) NOT NULL UNIQUE,
+                    last_sync_date DATE,
+                    last_sync_time TIMESTAMP,
+                    sync_status VARCHAR(20),
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (fund_code) REFERENCES funds(fund_code) ON DELETE CASCADE
+                );
+                
+                -- 设置表
+                CREATE TABLE IF NOT EXISTS settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key VARCHAR(50) UNIQUE NOT NULL,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                
+                -- AI 分析缓存表
+                CREATE TABLE IF NOT EXISTS ai_analysis (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fund_code VARCHAR(20) NOT NULL,
+                    analysis_type VARCHAR(20) NOT NULL DEFAULT 'fund',
+                    analysis TEXT NOT NULL,
+                    indicators TEXT,
+                    risk_metrics TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(fund_code, analysis_type)
+                );
+                
+                -- 创建索引
+                CREATE INDEX IF NOT EXISTS idx_prices_fund_code ON prices(fund_code);
+                CREATE INDEX IF NOT EXISTS idx_prices_date ON prices(date);
+                CREATE INDEX IF NOT EXISTS idx_trades_fund_code ON trades(fund_code);
+                CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(trade_date);
+                CREATE INDEX IF NOT EXISTS idx_ai_analysis_fund_code ON ai_analysis(fund_code);
+                
+                -- 初始化默认设置
+                INSERT OR IGNORE INTO settings (key, value) VALUES ('deepseek_api_key', '');
+                INSERT OR IGNORE INTO settings (key, value) VALUES ('deepseek_base_url', 'https://api.deepseek.com/v1');
+                INSERT OR IGNORE INTO settings (key, value) VALUES ('deepseek_model', 'deepseek-chat');
+            """)
+            
+            conn.commit()
+            conn.close()
+            
+            return {
+                "success": True,
+                "message": "SQLite 数据库初始化成功",
+                "database_type": "sqlite",
+                "path": db_path
+            }
+        else:
+            # PostgreSQL 初始化使用原有的 init_db 逻辑
+            from database import init_db
+            from database.connection import DB_TYPE, DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+            
+            # 临时修改连接参数
+            import os
+            original_host = os.environ.get("DB_HOST")
+            original_port = os.environ.get("DB_PORT")
+            original_name = os.environ.get("DB_NAME")
+            original_user = os.environ.get("DB_USER")
+            original_password = os.environ.get("DB_PASSWORD")
+            
+            os.environ["DB_HOST"] = request.pg_host or "localhost"
+            os.environ["DB_PORT"] = request.pg_port or "5432"
+            os.environ["DB_NAME"] = request.pg_name or "funds"
+            os.environ["DB_USER"] = request.pg_user or "postgres"
+            os.environ["DB_PASSWORD"] = request.pg_password or ""
+            os.environ["DB_TYPE"] = "postgresql"
+            
+            try:
+                init_db()
+                return {
+                    "success": True,
+                    "message": "PostgreSQL 数据库初始化成功",
+                    "database_type": "postgresql"
+                }
+            finally:
+                # 恢复原始环境变量
+                if original_host:
+                    os.environ["DB_HOST"] = original_host
+                if original_port:
+                    os.environ["DB_PORT"] = original_port
+                if original_name:
+                    os.environ["DB_NAME"] = original_name
+                if original_user:
+                    os.environ["DB_USER"] = original_user
+                if original_password:
+                    os.environ["DB_PASSWORD"] = original_password
+                    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"初始化失败: {str(e)}")
+
+
+@router.get("/database-status")
+async def get_database_status():
+    """获取当前数据库连接状态和表信息"""
+    import os
+    from pathlib import Path
+    from database.connection import DB_TYPE, SQLITE_PATH
+    
+    try:
+        # 尝试连接数据库
+        from database import get_db
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 获取表信息
+        if DB_TYPE == "sqlite":
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            rows = cursor.fetchall()
+            tables = [row[0] if isinstance(row, (list, tuple)) else row['name'] for row in rows]
+            
+            # 获取记录数
+            table_counts = {}
+            for table in tables:
+                if table.startswith('sqlite_'):  # 跳过 SQLite 系统表
+                    continue
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                row = cursor.fetchone()
+                count = row[0] if isinstance(row, (list, tuple)) else list(row.values())[0] if row else 0
+                table_counts[table] = count
+        else:
+            # PostgreSQL - 查询 public schema 的表
+            cursor.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_type = 'BASE TABLE'
+            """)
+            rows = cursor.fetchall()
+            tables = [row[0] if isinstance(row, (list, tuple)) else row['table_name'] for row in rows]
+            
+            # 获取记录数
+            table_counts = {}
+            for table in tables:
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    row = cursor.fetchone()
+                    count = row[0] if isinstance(row, (list, tuple)) else list(row.values())[0] if row else 0
+                    table_counts[table] = count
+                except Exception as table_error:
+                    table_counts[table] = -1  # 标记为无法读取
+        
+        conn.close()
+        
+        db_info = {
+            "connected": True,
+            "database_type": DB_TYPE,
+            "tables": tables,
+            "table_counts": table_counts,
+            "total_tables": len(tables)
+        }
+        
+        if DB_TYPE == "sqlite":
+            db_info["path"] = SQLITE_PATH
+            db_info["file_exists"] = Path(SQLITE_PATH).exists()
+        
+        return db_info
+        
+    except Exception as e:
+        import traceback
+        error_detail = f"{str(e)}\n{traceback.format_exc()}"
+        print(f"Database status check failed: {error_detail}")  # 打印到服务器日志
+        return {
+            "connected": False,
+            "database_type": DB_TYPE if 'DB_TYPE' in dir() else 'unknown',
+            "error": str(e)
+        }

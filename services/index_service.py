@@ -528,6 +528,7 @@ class IndexService:
                         "cached": True,
                         "is_today": is_today,
                         "date": cached_date_str,
+                        "update_time": cached.get("update_time"),
                         "cache_reason": reason
                     }
                 else:
@@ -539,10 +540,12 @@ class IndexService:
         if indices:
             # 使用指数数据中的日期
             data_date = indices[0].get("date") if indices else None
+            update_time = datetime.now().isoformat()
             cache_data = {
                 "indices": indices,
                 "date": data_date or datetime.now().isoformat(),
-                "selected_codes": selected_codes  # 保存用户选择
+                "selected_codes": selected_codes,  # 保存用户选择
+                "update_time": update_time
             }
             IndexService.save_indices_to_cache(cache_data)
             
@@ -560,7 +563,8 @@ class IndexService:
                 "data": indices,
                 "cached": False,
                 "is_today": is_today,
-                "date": data_date
+                "date": data_date,
+                "update_time": update_time
             }
         
         # 获取失败，尝试返回任何可用的缓存
@@ -570,7 +574,8 @@ class IndexService:
                 "cached": True,
                 "is_today": False,
                 "stale": True,
-                "date": cached.get("date")
+                "date": cached.get("date"),
+                "update_time": cached.get("update_time")
             }
         
         return {

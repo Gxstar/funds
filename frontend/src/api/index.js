@@ -74,7 +74,12 @@ export const marketAPI = {
   getChart: (code, period = '1m') => request(`${API_BASE}/market/${code}/chart?period=${period}`),
   sync: (code, force = false) => request(`${API_BASE}/market/${code}/sync?force=${force}`, { method: 'POST' }),
   syncAll: () => request(`${API_BASE}/market/sync-all`, { method: 'POST' }),
-  getIndices: () => request(`${API_BASE}/market/indices`),
+  getIndices: (skipCache = false) => {
+    const url = skipCache 
+      ? `${API_BASE}/market/indices?skip_cache=true`
+      : `${API_BASE}/market/indices`
+    return request(url)
+  },
   // 指数配置相关
   getAvailableIndices: () => request(`${API_BASE}/market/indices/available`),
   getSelectedIndices: () => request(`${API_BASE}/market/indices/selected`),
@@ -118,6 +123,10 @@ export const settingsAPI = {
   resetPrompts: () => request(`${API_BASE}/ai/prompts/reset`, { method: 'POST' }),
   getDatabaseConfig: () => request(`${API_BASE}/ai/database-config`),
   updateDatabaseConfig: (data) => request(`${API_BASE}/ai/database-config`, { method: 'POST', body: data }),
+  // 数据库测试和初始化
+  testDatabaseConnection: (data) => request(`${API_BASE}/ai/database-test`, { method: 'POST', body: data }),
+  initializeDatabase: (data) => request(`${API_BASE}/ai/database-init`, { method: 'POST', body: data }),
+  getDatabaseStatus: () => request(`${API_BASE}/ai/database-status`),
 }
 
 // ETF 相关 API

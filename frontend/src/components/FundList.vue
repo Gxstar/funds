@@ -1,11 +1,23 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Search, MagicStick } from '@element-plus/icons-vue'
 import { useFundStore } from '@/stores/funds'
 import { formatCurrency, formatPercent } from '@/utils/format'
 
 const router = useRouter()
 const fundStore = useFundStore()
+
+// Props
+const props = defineProps({
+  aiLoading: {
+    type: Boolean,
+    default: false
+  }
+})
+
+// Emits
+const emit = defineEmits(['ai-analysis'])
 
 const searchKeyword = ref('')
 const searchResults = ref([])
@@ -86,19 +98,17 @@ function selectFund(fund) {
             </span>
           </div>
         </div>
-        <div class="profit-bar">
-          <div class="profit-label">
-            <span>收益率</span>
-            <span :class="{ profit: fundStore.holdingsSummary.profit_rate > 0, loss: fundStore.holdingsSummary.profit_rate < 0 }">
-              {{ formatPercent(fundStore.holdingsSummary.profit_rate) }}
-            </span>
-          </div>
-          <el-progress 
-            :percentage="Math.min(Math.abs(fundStore.holdingsSummary.profit_rate || 0), 100)" 
-            :color="fundStore.holdingsSummary.profit_rate >= 0 ? '#f56c6c' : '#67c23a'"
-            :stroke-width="6"
-            :show-text="false"
-          />
+        <!-- AI分析按钮 -->
+        <div class="ai-action">
+          <el-button 
+            type="primary" 
+            class="ai-analysis-btn"
+            @click="$emit('ai-analysis')"
+            :loading="aiLoading"
+          >
+            <el-icon><MagicStick /></el-icon>
+            <span>AI智能分析</span>
+          </el-button>
         </div>
       </div>
     </div>
@@ -163,7 +173,7 @@ function selectFund(fund) {
 
 <style scoped>
 .fund-list-container {
-  padding: 16px;
+  padding: 12px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -172,21 +182,29 @@ function selectFund(fund) {
 
 /* 持仓汇总卡片 */
 .summary-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 12px;
+  background: #fff;
+  border-radius: 16px;
   padding: 16px;
-  margin-bottom: 16px;
-  color: #fff;
+  margin-bottom: 20px;
+  color: #1a1a2e;
   flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 6px 20px rgba(0, 0, 0, 0.04);
+  border: 1px solid #f0f0f0;
 }
 
 .summary-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 13px;
-  opacity: 0.9;
+  font-weight: 600;
+  color: #1a1a2e;
   margin-bottom: 12px;
+}
+
+.summary-header .el-icon {
+  color: #1890ff;
+  font-size: 16px;
 }
 
 .summary-body {
@@ -197,72 +215,89 @@ function selectFund(fund) {
 
 .summary-main {
   text-align: center;
-  padding: 8px 0;
+  padding: 4px 0;
 }
 
 .summary-main .summary-label {
   font-size: 12px;
-  opacity: 0.8;
+  color: #909399;
   margin-bottom: 4px;
 }
 
 .summary-main .summary-value {
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 700;
+  color: #1a1a2e;
 }
 
 .summary-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 8px;
 }
 
 .summary-grid .summary-item {
-  background: rgba(255, 255, 255, 0.15);
+  background: #f8fafc;
   border-radius: 8px;
-  padding: 10px;
+  padding: 8px 6px;
   text-align: center;
+  border: 1px solid #f1f5f9;
 }
 
 .summary-grid .label {
   font-size: 11px;
-  opacity: 0.8;
+  color: #64748b;
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 
 .summary-grid .value {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
+  color: #1a1a2e;
 }
 
 .summary-grid .value.profit {
-  color: #ff9999;
+  color: #dc2626;
 }
 
 .summary-grid .value.loss {
-  color: #99ffcc;
+  color: #16a34a;
 }
 
-.profit-bar {
-  background: rgba(255, 255, 255, 0.15);
+/* AI分析按钮 */
+.ai-action {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.ai-analysis-btn {
+  width: 100%;
+  height: 36px;
+  background: linear-gradient(135deg, #1890ff 0%, #36cfc9 100%);
+  border: none;
   border-radius: 8px;
-  padding: 10px;
-}
-
-.profit-label {
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.3s;
   display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  margin-bottom: 8px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
 }
 
-.profit-label .profit {
-  color: #ff9999;
+.ai-analysis-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.25);
 }
 
-.profit-label .loss {
-  color: #99ffcc;
+.ai-analysis-btn:active {
+  transform: translateY(0);
+}
+
+.ai-analysis-btn .el-icon {
+  font-size: 14px;
 }
 
 /* 搜索框 */
@@ -273,34 +308,43 @@ function selectFund(fund) {
 }
 
 .search-box :deep(.el-input__wrapper) {
-  border-radius: 10px;
-  background: #f5f7fa;
-  box-shadow: none;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e8eaed;
+  transition: all 0.2s;
 }
 
 .search-box :deep(.el-input__wrapper:hover) {
-  background: #eef0f3;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-color: #1890ff;
+}
+
+.search-box :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.15);
+  border-color: #1890ff;
 }
 
 .search-results {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + 12px);
   left: 0;
   right: 0;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  border: 1px solid #e8eaed;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
   z-index: 10;
-  max-height: 280px;
+  max-height: 320px;
   overflow-y: auto;
 }
 
 .search-item {
-  padding: 12px 16px;
+  padding: 14px 20px;
   cursor: pointer;
-  border-bottom: 1px solid #f0f0f0;
-  transition: background 0.2s;
+  border-bottom: 1px solid #f5f7fa;
+  transition: all 0.2s;
 }
 
 .search-item:last-child {
@@ -308,7 +352,7 @@ function selectFund(fund) {
 }
 
 .search-item:hover {
-  background: #f5f7fa;
+  background: #f0f7ff;
 }
 
 .search-item .name {
@@ -335,7 +379,7 @@ function selectFund(fund) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 4px;
+  padding: 6px 4px;
   font-size: 13px;
   color: #909399;
   font-weight: 500;
@@ -352,19 +396,24 @@ function selectFund(fund) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px;
+  padding: 10px 12px;
   border-radius: 10px;
   cursor: pointer;
   margin-bottom: 4px;
   transition: all 0.2s;
+  border: 1px solid transparent;
 }
 
 .fund-item:hover {
   background: #f5f7fa;
+  border-color: #e8eaed;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .fund-item.active {
-  background: linear-gradient(135deg, #e8f4ff 0%, #f0e8ff 100%);
+  background: #f0f9ff;
+  border-color: #1890ff;
+  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.12);
 }
 
 .fund-main {
@@ -409,12 +458,12 @@ function selectFund(fund) {
 }
 
 .fund-growth.positive {
-  color: #f56c6c;
-  background: #fef0f0;
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.1);
 }
 
 .fund-growth.negative {
-  color: #67c23a;
-  background: #f0f9eb;
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.1);
 }
 </style>

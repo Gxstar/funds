@@ -394,37 +394,53 @@ onUnmounted(() => {
 
 <template>
   <div v-loading="loading" class="fund-detail">
-    <!-- 基金基本信息 -->
-    <div class="info-card">
-      <div class="info-header">
-        <div class="fund-title">
+    <!-- 基金信息统计卡片 -->
+    <div class="fund-header-stats">
+      <!-- 基金名称和操作 -->
+      <div class="fund-title-bar">
+        <div class="fund-title-left">
           <span class="fund-name">{{ fund?.fund_name || '加载中...' }}</span>
-          <el-tag>{{ fund?.fund_code }}</el-tag>
+          <el-tag size="small" type="info" class="fund-code-tag">{{ fund?.fund_code }}</el-tag>
+          <el-tag v-if="fund?.fund_type" size="small" type="primary" class="fund-type-tag">{{ fund.fund_type }}</el-tag>
         </div>
         <el-space>
           <el-button size="small" @click="showETFDialog">设置ETF</el-button>
           <el-button size="small" type="danger" @click="deleteFund">删除</el-button>
         </el-space>
       </div>
-      <el-descriptions :column="5" border size="small">
-        <el-descriptions-item label="基金类型">{{ fund?.fund_type || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="风险等级">{{ fund?.risk_level || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="当前净值">{{ fund?.last_net_value?.toFixed(4) || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="日涨跌幅">
-          <span :class="{ positive: fund?.last_growth_rate > 0, negative: fund?.last_growth_rate < 0 }">
-            {{ fund?.last_growth_rate ? formatPercent(fund.last_growth_rate) : '-' }}
-          </span>
-          <span v-if="fund?.last_price_date" class="text-secondary">({{ fund.last_price_date }})</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="关联ETF">
-          <el-link v-if="fund?.related_etf" type="primary" @click="showETFDialog">{{ fund.related_etf }}</el-link>
-          <span v-else class="text-secondary">未设置</span>
-        </el-descriptions-item>
-      </el-descriptions>
+      
+      <!-- 统计数据行 -->
+      <div class="stats-row">
+        <div class="stat-item">
+          <div class="stat-label">当前净值</div>
+          <div class="stat-value">{{ fund?.last_net_value?.toFixed(4) || '-' }}</div>
+        </div>
+        <div class="stat-item" :class="{ profit: fund?.last_growth_rate > 0, loss: fund?.last_growth_rate < 0 }">
+          <div class="stat-label">日涨跌幅</div>
+          <div class="stat-value">
+            {{ fund?.last_growth_rate ? (fund.last_growth_rate > 0 ? '+' : '') + formatPercent(fund.last_growth_rate) : '-' }}
+          </div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">风险等级</div>
+          <div class="stat-value">{{ fund?.risk_level || '-' }}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">关联ETF</div>
+          <div class="stat-value">
+            <el-link v-if="fund?.related_etf" type="primary" @click="showETFDialog">{{ fund.related_etf }}</el-link>
+            <span v-else class="text-secondary">未设置</span>
+          </div>
+        </div>
+        <div v-if="holdingInfo" class="stat-item" :class="{ profit: holdingInfo.profit > 0, loss: holdingInfo.profit < 0 }">
+          <div class="stat-label">持仓盈亏</div>
+          <div class="stat-value">{{ formatCurrency(holdingInfo.profit) }}</div>
+        </div>
+      </div>
     </div>
 
     <!-- 持仓信息和 ETF 行情 -->
-    <el-row :gutter="16">
+    <el-row :gutter="24">
       <el-col :span="fund?.related_etf ? 12 : 24">
         <div class="info-card holding-card">
           <div class="info-header">
@@ -453,8 +469,8 @@ onUnmounted(() => {
           </div>
           <el-divider style="margin: 12px 0" />
           <el-space>
-            <el-button type="primary" @click="showTradeDialog('BUY')">买入</el-button>
-            <el-button v-if="holdingInfo" type="danger" @click="showTradeDialog('SELL')">卖出</el-button>
+            <el-button class="btn-buy" @click="showTradeDialog('BUY')">买入</el-button>
+            <el-button v-if="holdingInfo" class="btn-sell" @click="showTradeDialog('SELL')">卖出</el-button>
             <el-button @click="showHoldingDialog">设置持仓</el-button>
           </el-space>
         </div>
@@ -535,13 +551,28 @@ onUnmounted(() => {
           </el-button>
         </el-space>
       </div>
-      <el-space wrap class="mb-3">
-        <el-tag>MA5: {{ fundStore.aiAnalysis?.indicators?.ma5 || '-' }}</el-tag>
-        <el-tag>MA10: {{ fundStore.aiAnalysis?.indicators?.ma10 || '-' }}</el-tag>
-        <el-tag>MA20: {{ fundStore.aiAnalysis?.indicators?.ma20 || '-' }}</el-tag>
-        <el-tag>RSI: {{ fundStore.aiAnalysis?.indicators?.rsi || '-' }}</el-tag>
-        <el-tag>MACD: {{ fundStore.aiAnalysis?.indicators?.macd || '-' }}</el-tag>
-      </el-space>
+      <div class="indicators-row">
+        <div class="indicator-tag">
+          <span class="indicator-label">MA5</span>
+          <span class="indicator-value">{{ fundStore.aiAnalysis?.indicators?.ma5 || '-' }}</span>
+        </div>
+        <div class="indicator-tag">
+          <span class="indicator-label">MA10</span>
+          <span class="indicator-value">{{ fundStore.aiAnalysis?.indicators?.ma10 || '-' }}</span>
+        </div>
+        <div class="indicator-tag">
+          <span class="indicator-label">MA20</span>
+          <span class="indicator-value">{{ fundStore.aiAnalysis?.indicators?.ma20 || '-' }}</span>
+        </div>
+        <div class="indicator-tag">
+          <span class="indicator-label">RSI</span>
+          <span class="indicator-value">{{ fundStore.aiAnalysis?.indicators?.rsi || '-' }}</span>
+        </div>
+        <div class="indicator-tag">
+          <span class="indicator-label">MACD</span>
+          <span class="indicator-value">{{ fundStore.aiAnalysis?.indicators?.macd || '-' }}</span>
+        </div>
+      </div>
       <el-scrollbar v-if="fundStore.aiAnalysis" height="500px" class="ai-result">
         <div v-if="fundStore.aiAnalysis.timestamp" class="ai-time">
           分析时间: {{ new Date(fundStore.aiAnalysis.timestamp).toLocaleString('zh-CN') }}
@@ -629,30 +660,32 @@ onUnmounted(() => {
     </el-dialog>
 
     <!-- 交易记录弹窗 -->
-    <el-dialog v-model="tradeHistoryVisible" title="交易记录" width="900px">
-      <el-table :data="allTrades" max-height="400">
-        <el-table-column prop="trade_date" label="购买时间" width="110" />
-        <el-table-column prop="confirm_date" label="确认时间" width="110" />
-        <el-table-column prop="trade_type" label="类型" width="80">
+    <el-dialog v-model="tradeHistoryVisible" title="交易记录" width="800px">
+      <el-table :data="allTrades" max-height="400" style="width: 100%">
+        <el-table-column prop="trade_date" label="购买时间" min-width="100" />
+        <el-table-column prop="confirm_date" label="确认时间" min-width="100" />
+        <el-table-column prop="trade_type" label="类型" width="70" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.trade_type === 'BUY' ? 'danger' : 'success'">
+            <el-tag :type="row.trade_type === 'BUY' ? 'danger' : 'success'" size="small">
               {{ row.trade_type === 'BUY' ? '买入' : '卖出' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="confirm_net_value" label="确认净值" width="100">
+        <el-table-column prop="confirm_net_value" label="确认净值" min-width="90" align="right">
           <template #default="{ row }">{{ row.confirm_net_value ? parseFloat(row.confirm_net_value).toFixed(4) : '-' }}</template>
         </el-table-column>
-        <el-table-column prop="confirm_shares" label="确认份额" width="100">
+        <el-table-column prop="confirm_shares" label="确认份额" min-width="90" align="right">
           <template #default="{ row }">{{ row.confirm_shares ? parseFloat(row.confirm_shares).toFixed(2) : '-' }}</template>
         </el-table-column>
-        <el-table-column prop="amount" label="金额" width="110">
+        <el-table-column prop="amount" label="金额" min-width="100" align="right">
           <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column label="操作" width="130" align="center">
           <template #default="{ row }">
-            <el-button size="small" text type="primary" @click="editTrade(row)">编辑</el-button>
-            <el-button size="small" text type="danger" @click="deleteTrade(row.id)">删除</el-button>
+            <el-space :size="4">
+              <el-button size="small" text type="primary" @click="editTrade(row)">编辑</el-button>
+              <el-button size="small" text type="danger" @click="deleteTrade(row.id)">删除</el-button>
+            </el-space>
           </template>
         </el-table-column>
       </el-table>
@@ -701,11 +734,160 @@ onUnmounted(() => {
   gap: 16px;
 }
 
+/* 基金头部统计卡片 */
+.fund-header-stats {
+  background: #fff;
+  border-radius: 16px;
+  padding: 20px 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 6px 20px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s;
+}
+
+.fund-header-stats:hover {
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
+}
+
+.fund-title-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.fund-title-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.fund-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1a1a2e;
+}
+
+.fund-code-tag,
+.fund-type-tag {
+  font-size: 12px;
+}
+
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 24px;
+}
+
+.stat-item {
+  text-align: center;
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 1px solid #f1f5f9;
+  transition: all 0.2s;
+}
+
+.stat-item:hover {
+  background: #f1f5f9;
+  transform: translateY(-2px);
+}
+
+.stat-item .stat-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.stat-item .stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.stat-item.profit {
+  background: rgba(220, 38, 38, 0.05);
+  border-color: rgba(220, 38, 38, 0.1);
+}
+
+.stat-item.profit .stat-value {
+  color: #dc2626;
+}
+
+.stat-item.loss {
+  background: rgba(22, 163, 74, 0.05);
+  border-color: rgba(22, 163, 74, 0.1);
+}
+
+.stat-item.loss .stat-value {
+  color: #16a34a;
+}
+
+/* 买入卖出按钮样式 */
+.btn-buy {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+}
+
+.btn-buy:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.btn-sell {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+
+.btn-sell:hover {
+  background: #15803d;
+  border-color: #15803d;
+}
+
+/* 指标标签样式 */
+.indicators-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.indicator-tag {
+  display: flex;
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+.indicator-label {
+  background: #e0f2fe;
+  color: #0369a1;
+  padding: 4px 10px;
+  font-weight: 500;
+}
+
+.indicator-value {
+  padding: 4px 12px;
+  color: #1e293b;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
 .info-card {
   background: #fff;
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 6px 20px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s;
+}
+
+.info-card:hover {
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
 }
 
 .holding-card {
@@ -722,7 +904,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .fund-title {
@@ -747,10 +929,10 @@ onUnmounted(() => {
 }
 
 .ai-result {
-  background: #fafbfc;
+  background: #f8fafc;
   padding: 20px;
-  border-radius: 8px;
-  border: 1px solid #e8eaed;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
 }
 
 .ai-time {
@@ -789,7 +971,7 @@ onUnmounted(() => {
 
 .markdown-body :deep(h1) {
   font-size: 1.1em;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1890ff 0%, #36cfc9 100%);
   color: #fff;
 }
 
@@ -881,7 +1063,7 @@ onUnmounted(() => {
 }
 
 .markdown-body :deep(th) {
-  background: #667eea;
+  background: #0ea5e9;
   color: #fff;
   font-weight: 600;
 }
@@ -905,8 +1087,8 @@ onUnmounted(() => {
   text-decoration: underline;
 }
 
-.positive { color: #f56c6c; }
-.negative { color: #67c23a; }
+.positive { color: #d32f2f; }
+.negative { color: #388e3c; }
 .text-secondary { color: #909399; }
 .text-xs { font-size: 12px; }
 .mb-3 { margin-bottom: 12px; }

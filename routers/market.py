@@ -10,9 +10,13 @@ router = APIRouter(prefix="/api/market", tags=["行情数据"])
 
 
 @router.get("/indices")
-async def get_market_indices():
-    """获取大盘指数（使用缓存）"""
-    result = await IndexService.get_indices(use_cache=True)
+async def get_market_indices(skip_cache: bool = Query(default=False, description="跳过缓存，强制刷新")):
+    """获取大盘指数
+    
+    Args:
+        skip_cache: 是否跳过缓存，强制获取最新数据
+    """
+    result = await IndexService.get_indices(use_cache=not skip_cache)
     return result
 
 

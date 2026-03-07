@@ -3,6 +3,9 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useFundStore } from '@/stores/funds'
+import { aiAPI } from '@/api'
+import { formatCurrency, formatPercent, formatDateTime } from '@/utils/format'
+import { marked } from 'marked'
 import FundList from '@/components/FundList.vue'
 import SettingsDrawer from '@/components/SettingsDrawer.vue'
 import AddFundDialog from '@/components/AddFundDialog.vue'
@@ -13,6 +16,17 @@ const fundStore = useFundStore()
 const settingsDrawerVisible = ref(false)
 const refreshing = ref(false)
 const lastUpdateTime = ref('-')
+
+// AI 分析相关
+const portfolioLoading = ref(false)
+const portfolioAnalysis = ref(null)
+const showAnalysisDialog = ref(false)
+
+// 配置 marked
+marked.setOptions({
+  breaks: true,
+  gfm: true
+})
 
 // 更新最后更新时间
 function updateLastUpdateTime() {
@@ -59,6 +73,57 @@ async function handleDeleteFund(code) {
     ElMessage.error(error.message || '删除失败')
   }
 }
+
+// 渲染 Markdown
+function renderMarkdown(text) {
+  if (!text) return ''
+  return marked(text)
+}
+
+// AI 持仓分析 - 加载缓存（优先展示缓存，没有缓存不弹窗）
+async function loadPortfolioAnalysis() {
+  portfolioLoading.value = true
+  try {
+    // cacheOnly=true：只获取缓存，没有缓存时返回 no_cache
+    const result = await aiAPI.analyze(false, true)
+    if (result.no_cache) {
+      // 没有缓存，不显示弹窗
+      portfolioAnalysis.value = null
+    } else {
+      portfolioAnalysis.value = result
+    }
+  } catch (error) {
+    console.error('加载分析缓存失败:', error)
+  } finally {
+    portfolioLoading.value = false
+  }
+}
+
+// AI 持仓分析 - 刷新分析（强制重新分析并更新数据库）
+async function refreshPortfolioAnalysis() {
+  portfolioLoading.value = true
+  try {
+    // forceRefresh=true：强制重新分析，结果会保存到数据库替换旧数据
+    const result = await aiAPI.analyze(true, false)
+    if (result.error) throw new Error(result.error)
+    portfolioAnalysis.value = result
+  } catch (error) {
+    ElMessage.error(error.message || '分析失败')
+  } finally {
+    portfolioLoading.value = false
+  }
+}
+
+// AI 持仓分析 - 打开弹窗
+async function openAnalysisDialog() {
+  showAnalysisDialog.value = true
+  // 先尝试加载缓存
+  await loadPortfolioAnalysis()
+  // 如果没有缓存，则进行新分析
+  if (!portfolioAnalysis.value) {
+    await refreshPortfolioAnalysis()
+  }
+}
 </script>
 
 <template>
@@ -98,7 +163,10 @@ async function handleDeleteFund(code) {
     <el-container class="main-container">
       <!-- 左侧边栏 -->
       <el-aside width="300px" class="app-aside">
-        <FundList />
+        <FundList 
+          :ai-loading="portfolioLoading"
+          @ai-analysis="openAnalysisDialog"
+        />
       </el-aside>
 
       <!-- 主内容区 -->
@@ -126,6 +194,66 @@ async function handleDeleteFund(code) {
     
     <!-- 添加基金对话框 -->
     <AddFundDialog />
+
+    <!-- AI 分析结果弹窗 -->
+    <el-dialog v-model="showAnalysisDialog" title="AI 持仓分析报告" width="700px">
+      <div v-if="portfolioLoading" class="loading-wrapper">
+        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
+        <span>正在分析您的持仓组合，请稍候...</span>
+      </div>
+      <div v-else-if="portfolioAnalysis">
+        <!-- 分析时间和缓存状态 -->
+        <div class="analysis-header">
+          <div class="analysis-time">
+            <el-icon><Clock /></el-icon>
+            <span>分析时间：{{ formatDateTime(portfolioAnalysis.timestamp) }}</span>
+          </div>
+          <div class="analysis-actions">
+            <el-tag v-if="portfolioAnalysis.cached" type="warning" size="small">缓存</el-tag>
+            <el-tag v-else type="success" size="small">最新</el-tag>
+            <el-button type="primary" size="small" @click="refreshPortfolioAnalysis" :loading="portfolioLoading">
+              <el-icon><Refresh /></el-icon>
+              刷新分析
+            </el-button>
+          </div>
+        </div>
+        <!-- 汇总 -->
+        <div class="analysis-summary">
+          <div class="summary-item">
+            <div class="summary-label">持有基金</div>
+            <div class="summary-value">{{ portfolioAnalysis.summary?.fund_count }} 只</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">总投入</div>
+            <div class="summary-value">{{ formatCurrency(portfolioAnalysis.summary?.total_cost) }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">总市值</div>
+            <div class="summary-value">{{ formatCurrency(portfolioAnalysis.summary?.total_market_value) }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">总盈亏</div>
+            <div class="summary-value" :class="{ positive: portfolioAnalysis.summary?.total_profit > 0, negative: portfolioAnalysis.summary?.total_profit < 0 }">
+              {{ formatCurrency(portfolioAnalysis.summary?.total_profit) }}
+            </div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">收益率</div>
+            <div class="summary-value" :class="{ positive: portfolioAnalysis.summary?.profit_rate > 0, negative: portfolioAnalysis.summary?.profit_rate < 0 }">
+              {{ formatPercent(portfolioAnalysis.summary?.profit_rate) }}
+            </div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">账户仓位</div>
+            <div class="summary-value">{{ portfolioAnalysis.summary?.position_ratio?.toFixed(1) }}%</div>
+          </div>
+        </div>
+        <!-- 分析内容 -->
+        <el-scrollbar height="400px" class="analysis-content">
+          <div class="markdown-body" v-html="renderMarkdown(portfolioAnalysis.analysis)"></div>
+        </el-scrollbar>
+      </div>
+    </el-dialog>
   </el-container>
 </template>
 
@@ -155,7 +283,7 @@ html, body, #app {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  padding: 0 24px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
   z-index: 100;
   flex-shrink: 0;
@@ -168,10 +296,10 @@ html, body, #app {
 }
 
 .logo {
-  width: 36px;
-  height: 36px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, #1890ff 0%, #36cfc9 100%);
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -186,25 +314,30 @@ html, body, #app {
 
 .header-right {
   display: flex;
-  gap: 8px;
+  gap: 12px;
 }
 
 .header-right .el-button.is-circle {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border: none;
-  background: #f5f7fa;
+  background: #fff;
   color: #606266;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s;
 }
 
 .header-right .el-button.is-circle:hover {
-  background: #e8eaed;
-  color: #409eff;
+  background: #f0f7ff;
+  color: #1890ff;
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.15);
+  transform: translateY(-1px);
 }
 
 .header-right .el-button.is-circle.active {
-  background: #e8f4ff;
-  color: #409eff;
+  background: #1890ff;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.25);
 }
 
 /* 主容器 */
@@ -219,13 +352,14 @@ html, body, #app {
   border-right: 1px solid #e8eaed;
   overflow: hidden;
   flex-shrink: 0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.03);
 }
 
 /* 主内容区 */
 .app-main {
   display: flex;
   background: #f0f2f5;
-  padding: 20px;
+  padding: 24px;
   overflow-y: auto;
   justify-content: center; /* 水平居中 */
 }
@@ -237,7 +371,7 @@ html, body, #app {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  padding: 0 24px;
   height: 32px;
   font-size: 12px;
   color: #909399;
@@ -248,5 +382,84 @@ html, body, #app {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* AI 分析弹窗样式 */
+.loading-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px;
+  gap: 12px;
+  color: #909399;
+}
+
+.analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-radius: 8px;
+}
+
+.analysis-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.analysis-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.analysis-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+  background: #f8fafc;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #f1f5f9;
+}
+
+.analysis-summary .summary-item {
+  text-align: center;
+}
+
+.analysis-summary .summary-label {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 4px;
+}
+
+.analysis-summary .summary-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.analysis-summary .summary-value.positive {
+  color: #dc2626;
+}
+
+.analysis-summary .summary-value.negative {
+  color: #16a34a;
+}
+
+.analysis-content {
+  background: #f5f7fa;
+  padding: 16px;
+  border-radius: 8px;
+}
+
+.markdown-body {
+  line-height: 1.8;
 }
 </style>
