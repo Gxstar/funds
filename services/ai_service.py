@@ -470,8 +470,9 @@ class AIService:
         else:
             position_info = "未设置满仓金额（可在设置中配置）"
         
-        # 并发获取 ETF 数据和基金详情（提升性能）
+        # 并发获取 ETF 数据、基金详情和新闻（提升性能）
         related_etf = fund.get("related_etf")
+        fund_type = fund.get("fund_type", "")
         
         async def fetch_etf_data():
             """获取 ETF 数据"""
@@ -492,10 +493,23 @@ class AIService:
                 logger.warning(f"获取基金详情失败: {e}")
                 return None
         
+        async def fetch_news():
+            """获取相关新闻"""
+            try:
+                from services.news_service import NewsService
+                etf_name = None
+                if fund_detail and isinstance(fund_detail, dict):
+                    etf_name = fund_detail.get("etf_name") or fund_detail.get("name")
+                return await NewsService.get_fund_related_news(fund_type, etf_name, max_news=5)
+            except Exception as e:
+                logger.warning(f"获取新闻失败: {e}")
+                return []
+        
         # 并发执行
-        etf_data, fund_detail = await asyncio.gather(
+        etf_data, fund_detail, news_list = await asyncio.gather(
             fetch_etf_data(),
-            fetch_fund_detail()
+            fetch_fund_detail(),
+            fetch_news()
         )
         
         # 处理 ETF 数据
@@ -525,6 +539,10 @@ class AIService:
         
         # 处理基金详情
         fund_detail_info = FundDetailService.format_detail_for_ai(fund_detail) if fund_detail else "基金详情数据暂不可用"
+        
+        # 处理新闻数据
+        from services.news_service import NewsService
+        news_info = NewsService.format_news_for_ai(news_list) if news_list else "暂无相关新闻"
         
         # 获取用户交易历史（近10笔）
         try:
@@ -578,7 +596,8 @@ class AIService:
             holding_info=holding_info,
             position_info=position_info,
             trade_history=trade_history,
-            time_based_action=time_data["time_based_action"]
+            time_based_action=time_data["time_based_action"],
+            news_info=news_info
         )
         
         try:
