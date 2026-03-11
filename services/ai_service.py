@@ -493,24 +493,22 @@ class AIService:
                 logger.warning(f"获取基金详情失败: {e}")
                 return None
         
-        async def fetch_news():
-            """获取相关新闻"""
-            try:
-                from services.news_service import NewsService
-                etf_name = None
-                if fund_detail and isinstance(fund_detail, dict):
-                    etf_name = fund_detail.get("etf_name") or fund_detail.get("name")
-                return await NewsService.get_fund_related_news(fund_type, etf_name, max_news=5)
-            except Exception as e:
-                logger.warning(f"获取新闻失败: {e}")
-                return []
-        
-        # 并发执行
-        etf_data, fund_detail, news_list = await asyncio.gather(
+        # 并发执行 ETF 和基金详情获取
+        etf_data, fund_detail = await asyncio.gather(
             fetch_etf_data(),
-            fetch_fund_detail(),
-            fetch_news()
+            fetch_fund_detail()
         )
+        
+        # 获取新闻（在 fund_detail 获取后执行，以便使用基金名称）
+        news_list = []
+        try:
+            from services.news_service import NewsService
+            etf_name = None
+            if fund_detail and isinstance(fund_detail, dict):
+                etf_name = fund_detail.get("etf_name") or fund_detail.get("name")
+            news_list = await NewsService.get_fund_related_news(fund_type, etf_name, max_news=5)
+        except Exception as e:
+            logger.warning(f"获取新闻失败: {e}")
         
         # 处理 ETF 数据
         etf_info = "暂无关联 ETF"
@@ -575,10 +573,28 @@ class AIService:
         
         # 从配置文件加载提示词
         system_prompt, user_prompt_template = get_fund_analysis_prompts()
-        
+
         # 获取时间信息
         time_data = get_trading_time_info()
-        
+
+        # 获取市场情绪数据
+        try:
+            sentiment_data = await MarketSentimentService.get_market_sentiment()
+            market_breadth = sentiment_data.get('market_breadth') or {}
+            north_flow = sentiment_data.get('north_flow') or {}
+
+            up_count = market_breadth.get('up_count', 0)
+            down_count = market_breadth.get('down_count', 0)
+            breadth_desc = market_breadth.get('description', '数据暂不可用')
+            north_status = north_flow.get('status', '数据暂不可用')
+
+            market_sentiment = f"""涨跌家数: {up_count} 涨 / {down_count} 跌
+- 市场情绪: {breadth_desc}
+- 北向资金: {north_status}"""
+        except Exception as e:
+            logger.warning(f"获取市场情绪失败: {e}")
+            market_sentiment = "市场情绪数据暂不可用"
+
         # 构建提示词
         prompt = user_prompt_template.format(
             time_info=time_data["time_info"],
@@ -597,7 +613,8 @@ class AIService:
             position_info=position_info,
             trade_history=trade_history,
             time_based_action=time_data["time_based_action"],
-            news_info=news_info
+            news_info=news_info,
+            market_sentiment=market_sentiment
         )
         
         try:

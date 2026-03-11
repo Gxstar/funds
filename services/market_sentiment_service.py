@@ -226,78 +226,237 @@ class MarketSentimentService:
     
     @staticmethod
     async def _get_market_breadth_fallback() -> Optional[Dict]:
-        """备用方案：使用更轻量的接口获取涨跌家数"""
+        """备用方案：使用多种方法获取涨跌家数"""
+        # 方案1: 尝试分开获取沪深数据（减少单次数据量）
         try:
-            loop = asyncio.get_event_loop()
-            
-            def _fetch_fallback():
-                import httpx
-                # 东方财富涨跌家数接口（更轻量）
-                url = "https://push2.eastmoney.com/api/qt/clist/get"
-                params = {
-                    "fid": "f3",
-                    "po": "1",
-                    "pz": "5000",
-                    "pn": "1",
-                    "np": "1",
-                    "ut": "bd1d9ddb04089700cf9c27f6f7426281",
-                    "fltt": "2",
-                    "invt": "2",
-                    "fs": "m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23",
-                    "fields": "f12,f14,f2,f3,f4"
-                }
-                resp = httpx.get(url, params=params, timeout=REQUEST_TIMEOUT)
-                if resp.status_code != 200:
-                    return None
-                return resp.json()
-            
-            data = await loop.run_in_executor(None, _fetch_fallback)
-            
-            if not data or "data" not in data or "diff" not in data["data"]:
-                return None
-            
-            up_count = 0
-            down_count = 0
-            flat_count = 0
-            
-            for item in data["data"]["diff"]:
-                change_pct = item.get("f3", 0)
+            result = await MarketSentimentService._get_market_breadth_by_exchange()
+            if result:
+                return result
+        except Exception as e:
+            logger.warning(f"分市场获取涨跌家数失败: {e}")
+        
+        # 方案2: 尝试腾讯财经接口
+        try:
+            result = await MarketSentimentService._get_market_breadth_tencent()
+            if result:
+                return result
+        except Exception as e:
+            logger.warning(f"腾讯接口获取涨跌家数失败: {e}")
+        
+        # 方案3: 尝试东方财富轻量接口
+        try:
+            result = await MarketSentimentService._get_market_breadth_eastmoney()
+            if result:
+                return result
+        except Exception as e:
+            logger.warning(f"东方财富备用接口获取涨跌家数失败: {e}")
+        
+        return None
+    
+    @staticmethod
+    async def _get_market_breadth_by_exchange() -> Optional[Dict]:
+        """分别获取上海和深圳市场的涨跌家数，减少单次数据量"""
+        loop = asyncio.get_event_loop()
+        
+        def _fetch_sh():
+            import akshare as ak
+            return ak.stock_sh_a_spot_em()
+        
+        def _fetch_sz():
+            import akshare as ak
+            return ak.stock_sz_a_spot_em()
+        
+        # 并发获取沪深数据
+        sh_df, sz_df = await asyncio.gather(
+            loop.run_in_executor(None, _fetch_sh),
+            loop.run_in_executor(None, _fetch_sz)
+        )
+        
+        up_count = 0
+        down_count = 0
+        flat_count = 0
+        limit_up = 0
+        limit_down = 0
+        
+        for df in [sh_df, sz_df]:
+            if df is None or df.empty:
+                continue
+            for _, row in df.iterrows():
+                change_pct = row.get('涨跌幅', 0)
                 if change_pct is None:
                     continue
                 try:
                     change_pct = float(change_pct)
                 except (ValueError, TypeError):
                     continue
-                
+                    
                 if change_pct > 0:
                     up_count += 1
+                    if change_pct >= 9.8:
+                        limit_up += 1
                 elif change_pct < 0:
                     down_count += 1
+                    if change_pct <= -9.8:
+                        limit_down += 1
                 else:
                     flat_count += 1
-            
-            total = up_count + down_count + flat_count
-            
-            if total < 1000:
+        
+        total = up_count + down_count + flat_count
+        
+        if total < 1000:
+            return None
+        
+        up_ratio = (up_count / total * 100) if total > 0 else 0
+        
+        return {
+            "up_count": up_count,
+            "down_count": down_count,
+            "flat_count": flat_count,
+            "limit_up": limit_up,
+            "limit_down": limit_down,
+            "total": total,
+            "up_ratio": round(up_ratio, 1),
+            "description": MarketSentimentService._describe_market_breadth(up_count, down_count, total),
+            "source": "akshare_exchange"
+        }
+    
+    @staticmethod
+    async def _get_market_breadth_tencent() -> Optional[Dict]:
+        """使用腾讯财经接口获取涨跌家数"""
+        loop = asyncio.get_event_loop()
+        
+        def _fetch_tencent():
+            import httpx
+            # 腾讯财经市场概况接口
+            url = "https://qt.gtimg.cn/q=sh000001,sz399001,sz399006"
+            resp = httpx.get(url, timeout=10)
+            if resp.status_code != 200:
                 return None
             
-            up_ratio = (up_count / total * 100) if total > 0 else 0
+            # 同时获取涨跌家数统计
+            url2 = "https://qt.gtimg.cn/q=hn~shsz~up,hn~shsz~down,hn~shsz~flat"
+            resp2 = httpx.get(url2, timeout=10)
             
-            return {
-                "up_count": up_count,
-                "down_count": down_count,
-                "flat_count": flat_count,
-                "limit_up": None,  # 备用接口不提供涨停数
-                "limit_down": None,
-                "total": total,
-                "up_ratio": round(up_ratio, 1),
-                "description": MarketSentimentService._describe_market_breadth(up_count, down_count, total),
-                "source": "eastmoney_fallback"
-            }
+            if resp2.status_code != 200:
+                return None
             
-        except Exception as e:
-            logger.warning(f"备用接口获取涨跌家数也失败: {e}")
+            text = resp2.text
+            up_count = 0
+            down_count = 0
+            flat_count = 0
+            
+            # 解析腾讯格式的数据
+            for line in text.split(';'):
+                if 'hn~shsz~up' in line and '"' in line:
+                    try:
+                        up_count = int(line.split('"')[1])
+                    except:
+                        pass
+                elif 'hn~shsz~down' in line and '"' in line:
+                    try:
+                        down_count = int(line.split('"')[1])
+                    except:
+                        pass
+                elif 'hn~shsz~flat' in line and '"' in line:
+                    try:
+                        flat_count = int(line.split('"')[1])
+                    except:
+                        pass
+            
+            return up_count, down_count, flat_count
+        
+        result = await loop.run_in_executor(None, _fetch_tencent)
+        if not result:
             return None
+        
+        up_count, down_count, flat_count = result
+        total = up_count + down_count + flat_count
+        
+        if total < 1000:
+            return None
+        
+        up_ratio = (up_count / total * 100) if total > 0 else 0
+        
+        return {
+            "up_count": up_count,
+            "down_count": down_count,
+            "flat_count": flat_count,
+            "limit_up": None,
+            "limit_down": None,
+            "total": total,
+            "up_ratio": round(up_ratio, 1),
+            "description": MarketSentimentService._describe_market_breadth(up_count, down_count, total),
+            "source": "tencent"
+        }
+    
+    @staticmethod
+    async def _get_market_breadth_eastmoney() -> Optional[Dict]:
+        """使用东方财富轻量接口获取涨跌家数"""
+        loop = asyncio.get_event_loop()
+        
+        def _fetch_eastmoney():
+            import httpx
+            url = "https://push2.eastmoney.com/api/qt/clist/get"
+            params = {
+                "fid": "f3",
+                "po": "1",
+                "pz": "5000",
+                "pn": "1",
+                "np": "1",
+                "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+                "fltt": "2",
+                "invt": "2",
+                "fs": "m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23",
+                "fields": "f12,f14,f2,f3,f4"
+            }
+            resp = httpx.get(url, params=params, timeout=REQUEST_TIMEOUT)
+            if resp.status_code != 200:
+                return None
+            return resp.json()
+        
+        data = await loop.run_in_executor(None, _fetch_eastmoney)
+        
+        if not data or "data" not in data or "diff" not in data["data"]:
+            return None
+        
+        up_count = 0
+        down_count = 0
+        flat_count = 0
+        
+        for item in data["data"]["diff"]:
+            change_pct = item.get("f3", 0)
+            if change_pct is None:
+                continue
+            try:
+                change_pct = float(change_pct)
+            except (ValueError, TypeError):
+                continue
+            
+            if change_pct > 0:
+                up_count += 1
+            elif change_pct < 0:
+                down_count += 1
+            else:
+                flat_count += 1
+        
+        total = up_count + down_count + flat_count
+        
+        if total < 1000:
+            return None
+        
+        up_ratio = (up_count / total * 100) if total > 0 else 0
+        
+        return {
+            "up_count": up_count,
+            "down_count": down_count,
+            "flat_count": flat_count,
+            "limit_up": None,
+            "limit_down": None,
+            "total": total,
+            "up_ratio": round(up_ratio, 1),
+            "description": MarketSentimentService._describe_market_breadth(up_count, down_count, total),
+            "source": "eastmoney"
+        }
     
     @staticmethod
     def _describe_market_breadth(up_count: int, down_count: int, total: int) -> str:
