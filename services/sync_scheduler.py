@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 class SyncScheduler:
     """后台同步调度器
     
-    每日两次同步：
-    - 14:50 盘中决策同步
-    - 15:30 收盘后同步
+    场外基金净值同步时间：
+    - 20:30 晚间净值同步（净值通常在晚上8-10点更新）
+    - 08:30 次日晨间同步（作为备用，补充昨晚未同步的数据）
     """
     
-    SYNC_TIMES = ["14:50", "15:30"]
+    SYNC_TIMES = ["20:30", "08:30"]
     
     def __init__(self):
         self._running = False

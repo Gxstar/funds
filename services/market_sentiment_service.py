@@ -55,20 +55,31 @@ class MarketSentimentCache:
         if self._is_trading_time():
             # 交易时间内，短缓存
             return TRADING_CACHE_TTL
-        elif self._is_after_market_close():
-            # 收盘后，长缓存（到次日开盘）
-            return 3600  # 1小时，实际会在次日开盘时自动失效
         else:
-            # 开盘前，使用较长缓存
-            return 1800  # 30分钟
+            # 收盘后或开盘前，使用较长缓存
+            # 实际会在 get() 中通过日期判断
+            return 3600  # 1小时（兜底值）
     
     def get(self) -> Optional[Dict]:
+        """获取缓存数据（智能缓存策略）"""
         with self._lock:
             if not self._data or not self._timestamp:
                 return None
             
+            now = datetime.now()
+            
+            # 收盘后：检查是否是同一天的数据
+            if self._is_after_market_close():
+                cache_date = self._timestamp.date()
+                today = now.date()
+                if cache_date == today:
+                    return self._data
+                else:
+                    return None
+            
+            # 交易时间内或开盘前：使用动态TTL
             ttl = self._get_cache_ttl()
-            age = (datetime.now() - self._timestamp).total_seconds()
+            age = (now - self._timestamp).total_seconds()
             
             if age < ttl:
                 return self._data

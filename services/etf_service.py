@@ -10,17 +10,55 @@ logger = logging.getLogger(__name__)
 
 
 class ETFCache:
-    """ETF 数据缓存管理器"""
+    """ETF 数据缓存管理器 - 智能缓存策略
+    
+    交易时间内(9:30-15:00): 5分钟缓存（ETF作为参考需要较新数据）
+    收盘后(15:00后): 当日数据一直有效（收盘后数据不会变化）
+    """
+    
+    # A股交易时间段
+    MARKET_OPEN_TIME = dt_time(9, 30)
+    MARKET_CLOSE_TIME = dt_time(15, 0)
     
     def __init__(self):
         self._cache: Dict[str, dict] = {}  # {etf_code: {data, timestamp, type}}
         self._lock = Lock()
         
-        # 缓存有效期配置（秒）- 统一使用 30 分钟
-        self.CACHE_TTL = 1800  # 30 分钟
+        # 缓存有效期配置（秒）
+        self.TRADING_CACHE_TTL = 300  # 交易时间内：5分钟
+        self.AFTER_MARKET_TTL = 3600  # 收盘后：1小时（实际会用日期判断）
+    
+    def _is_trading_time(self) -> bool:
+        """判断当前是否在A股交易时间段内 (9:30-15:00)"""
+        now = datetime.now()
+        current_time = now.time()
+        weekday = now.weekday()
+        
+        if weekday >= 5:  # 周末
+            return False
+        
+        return self.MARKET_OPEN_TIME <= current_time <= self.MARKET_CLOSE_TIME
+    
+    def _is_after_market_close(self) -> bool:
+        """判断当前是否已收盘 (15:00 后)"""
+        now = datetime.now()
+        current_time = now.time()
+        weekday = now.weekday()
+        
+        if weekday >= 5:
+            return True  # 周末视为收盘后
+        
+        return current_time >= self.MARKET_CLOSE_TIME
+    
+    def _get_cache_ttl(self) -> int:
+        """根据交易状态动态获取缓存TTL"""
+        if self._is_trading_time():
+            return self.TRADING_CACHE_TTL
+        else:
+            return self.AFTER_MARKET_TTL
     
     def get(self, etf_code: str, data_type: str = 'realtime') -> Optional[dict]:
-        """获取缓存数据"""
+        """获取缓存数据（智能缓存策略）"""
         with self._lock:
             key = f"{etf_code}_{data_type}"
             if key not in self._cache:
@@ -30,12 +68,27 @@ class ETFCache:
             now = datetime.now()
             age = (now - cached['timestamp']).total_seconds()
             
-            if age < self.CACHE_TTL:
-                logger.debug(f"缓存命中: {key}, 年龄: {age:.0f}秒")
-                # 返回数据时添加缓存时间戳
-                result = cached['data'].copy()
-                result['cached_at'] = cached['timestamp'].isoformat()
-                return result
+            # 智能缓存策略
+            if self._is_after_market_close():
+                # 收盘后：检查是否是同一天的数据
+                cache_date = cached['timestamp'].date()
+                today = now.date()
+                if cache_date == today:
+                    logger.debug(f"收盘后缓存命中: {key}, 日期相同")
+                    result = cached['data'].copy()
+                    result['cached_at'] = cached['timestamp'].isoformat()
+                    return result
+                else:
+                    logger.debug(f"收盘后缓存过期: {key}, 缓存日期={cache_date}, 今日={today}")
+                    return None
+            else:
+                # 交易时间内或开盘前：使用动态TTL
+                ttl = self._get_cache_ttl()
+                if age < ttl:
+                    logger.debug(f"缓存命中: {key}, 年龄: {age:.0f}秒, TTL: {ttl}秒")
+                    result = cached['data'].copy()
+                    result['cached_at'] = cached['timestamp'].isoformat()
+                    return result
             
             return None
     

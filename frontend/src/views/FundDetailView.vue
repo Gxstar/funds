@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useFundStore } from '@/stores/funds'
-import { etfAPI, tradeAPI } from '@/api'
+import { etfAPI, tradeAPI, marketAPI } from '@/api'
 import { formatCurrency, formatPercent } from '@/utils/format'
 import * as echarts from 'echarts'
 import { marked } from 'marked'
@@ -65,6 +65,9 @@ const etfForm = ref({
 
 // ETF 刷新状态
 const etfRefreshing = ref(false)
+
+// 同步基金净值状态
+const syncingFund = ref(false)
 
 // 推荐 ETF 列表
 const recommendedEtfs = ref([])
@@ -360,6 +363,30 @@ async function refreshETF() {
   }
 }
 
+// 同步基金净值
+async function syncFundData() {
+  if (!route.params.code) return
+  syncingFund.value = true
+  try {
+    const result = await marketAPI.sync(route.params.code)
+    if (result.status === 'success') {
+      ElMessage.success(`同步成功，更新 ${result.count || 0} 条记录`)
+      // 刷新图表和基金数据
+      await fundStore.selectFund(route.params.code)
+      await fundStore.loadChartData(route.params.code, period.value)
+      initChart()
+    } else if (result.status === 'skipped') {
+      ElMessage.info(result.message || '数据已是最新')
+    } else {
+      throw new Error(result.error || '同步失败')
+    }
+  } catch (error) {
+    ElMessage.error(error.message || '同步失败')
+  } finally {
+    syncingFund.value = false
+  }
+}
+
 // 渲染 Markdown
 function renderMarkdown(text) {
   if (!text) return ''
@@ -512,14 +539,21 @@ onUnmounted(() => {
         <div class="info-card">
           <div class="info-header">
             <span class="section-title">净值走势</span>
-            <el-radio-group v-model="period" size="small" @change="changePeriod">
-              <el-radio-button value="3m">3月</el-radio-button>
-              <el-radio-button value="6m">6月</el-radio-button>
-              <el-radio-button value="1y">1年</el-radio-button>
-              <el-radio-button value="3y">3年</el-radio-button>
-              <el-radio-button value="5y">5年</el-radio-button>
-              <el-radio-button value="all">全部</el-radio-button>
-            </el-radio-group>
+            <el-space>
+              <el-radio-group v-model="period" size="small" @change="changePeriod">
+                <el-radio-button value="3m">3月</el-radio-button>
+                <el-radio-button value="6m">6月</el-radio-button>
+                <el-radio-button value="1y">1年</el-radio-button>
+                <el-radio-button value="3y">3年</el-radio-button>
+                <el-radio-button value="5y">5年</el-radio-button>
+                <el-radio-button value="all">全部</el-radio-button>
+              </el-radio-group>
+              <el-tooltip content="同步最新净值" placement="top">
+                <el-button size="small" :loading="syncingFund" @click="syncFundData">
+                  <el-icon><Refresh /></el-icon>
+                </el-button>
+              </el-tooltip>
+            </el-space>
           </div>
           <div ref="chartRef" class="chart-container"></div>
         </div>

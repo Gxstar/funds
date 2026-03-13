@@ -47,6 +47,9 @@ const availableIndices = ref([])
 const selectedIndicesCodes = ref([])
 const indicesSaving = ref(false)
 
+// 同步所有基金状态
+const syncingAll = ref(false)
+
 // 按类别分组的可选指数
 const groupedIndices = computed(() => {
   const groups = { 'A股': [], '港股': [], '美股': [] }
@@ -391,6 +394,32 @@ async function refreshIndices() {
   await loadIndices(true)
 }
 
+// 同步所有基金净值
+async function syncAllFunds() {
+  syncingAll.value = true
+  try {
+    const result = await marketAPI.syncAll()
+    const successCount = result.results?.filter(r => r.status === 'success').length || 0
+    const failedCount = result.results?.filter(r => r.status === 'failed').length || 0
+    
+    if (failedCount > 0) {
+      ElMessage.warning(`同步完成：成功 ${successCount} 只，失败 ${failedCount} 只`)
+    } else {
+      ElMessage.success(`同步完成：成功 ${successCount} 只基金`)
+    }
+    
+    // 刷新数据
+    await Promise.all([
+      fundStore.loadFunds(),
+      fundStore.loadHoldingsSummary()
+    ])
+  } catch (error) {
+    ElMessage.error(error.message || '同步失败')
+  } finally {
+    syncingAll.value = false
+  }
+}
+
 // 打开指数选择对话框
 async function openIndicesDialog() {
   showIndicesDialog.value = true
@@ -520,6 +549,17 @@ onUnmounted(() => {
 
 <template>
   <div class="home-page">
+    <!-- 操作栏 -->
+    <div class="action-bar">
+      <el-button type="primary" @click="syncAllFunds" :loading="syncingAll">
+        <el-icon><Refresh /></el-icon>
+        同步净值
+      </el-button>
+      <el-tooltip content="同步所有基金的最新净值数据" placement="top">
+        <el-icon class="help-icon"><QuestionFilled /></el-icon>
+      </el-tooltip>
+    </div>
+
     <!-- 顶部统计卡片 -->
     <div class="stats-row">
       <div class="stat-card">
