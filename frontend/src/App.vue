@@ -3,15 +3,18 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useFundStore } from '@/stores/funds'
+import { useHoldingStore } from '@/stores/holdings'
 import { aiAPI } from '@/api'
 import { formatCurrency, formatPercent, formatDateTime } from '@/utils/format'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown'
 import FundList from '@/components/FundList.vue'
 import SettingsDrawer from '@/components/SettingsDrawer.vue'
 import AddFundDialog from '@/components/AddFundDialog.vue'
+import AIAnalysisDialog from '@/components/AIAnalysisDialog.vue'
 
 const router = useRouter()
 const fundStore = useFundStore()
+const holdingStore = useHoldingStore()
 
 const settingsDrawerVisible = ref(false)
 const refreshing = ref(false)
@@ -21,12 +24,6 @@ const lastUpdateTime = ref('-')
 const portfolioLoading = ref(false)
 const portfolioAnalysis = ref(null)
 const showAnalysisDialog = ref(false)
-
-// 配置 marked
-marked.setOptions({
-  breaks: true,
-  gfm: true
-})
 
 // 更新最后更新时间
 function updateLastUpdateTime() {
@@ -39,9 +36,14 @@ function updateLastUpdateTime() {
 }
 
 onMounted(async () => {
-  await fundStore.loadFunds()
-  await fundStore.loadHoldingsSummary()
-  updateLastUpdateTime()
+  try {
+    await fundStore.loadFunds()
+    await holdingStore.loadHoldingsSummary()
+    updateLastUpdateTime()
+  } catch (err) {
+    console.error('加载数据失败:', err)
+    ElMessage.error('加载数据失败，请检查服务器连接')
+  }
 })
 
 // 刷新数据
@@ -72,12 +74,6 @@ async function handleDeleteFund(code) {
   } catch (error) {
     ElMessage.error(error.message || '删除失败')
   }
-}
-
-// 渲染 Markdown
-function renderMarkdown(text) {
-  if (!text) return ''
-  return marked(text)
 }
 
 // AI 持仓分析 - 加载缓存（优先展示缓存，没有缓存不弹窗）
@@ -196,64 +192,12 @@ async function openAnalysisDialog() {
     <AddFundDialog />
 
     <!-- AI 分析结果弹窗 -->
-    <el-dialog v-model="showAnalysisDialog" title="AI 持仓分析报告" width="700px">
-      <div v-if="portfolioLoading" class="loading-wrapper">
-        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <span>正在分析您的持仓组合，请稍候...</span>
-      </div>
-      <div v-else-if="portfolioAnalysis">
-        <!-- 分析时间和缓存状态 -->
-        <div class="analysis-header">
-          <div class="analysis-time">
-            <el-icon><Clock /></el-icon>
-            <span>分析时间：{{ formatDateTime(portfolioAnalysis.timestamp) }}</span>
-          </div>
-          <div class="analysis-actions">
-            <el-tag v-if="portfolioAnalysis.cached" type="warning" size="small">缓存</el-tag>
-            <el-tag v-else type="success" size="small">最新</el-tag>
-            <el-button type="primary" size="small" @click="refreshPortfolioAnalysis" :loading="portfolioLoading">
-              <el-icon><Refresh /></el-icon>
-              刷新分析
-            </el-button>
-          </div>
-        </div>
-        <!-- 汇总 -->
-        <div class="analysis-summary">
-          <div class="summary-item">
-            <div class="summary-label">持有基金</div>
-            <div class="summary-value">{{ portfolioAnalysis.summary?.fund_count }} 只</div>
-          </div>
-          <div class="summary-item">
-            <div class="summary-label">总投入</div>
-            <div class="summary-value">{{ formatCurrency(portfolioAnalysis.summary?.total_cost) }}</div>
-          </div>
-          <div class="summary-item">
-            <div class="summary-label">总市值</div>
-            <div class="summary-value">{{ formatCurrency(portfolioAnalysis.summary?.total_market_value) }}</div>
-          </div>
-          <div class="summary-item">
-            <div class="summary-label">总盈亏</div>
-            <div class="summary-value" :class="{ positive: portfolioAnalysis.summary?.total_profit > 0, negative: portfolioAnalysis.summary?.total_profit < 0 }">
-              {{ formatCurrency(portfolioAnalysis.summary?.total_profit) }}
-            </div>
-          </div>
-          <div class="summary-item">
-            <div class="summary-label">收益率</div>
-            <div class="summary-value" :class="{ positive: portfolioAnalysis.summary?.profit_rate > 0, negative: portfolioAnalysis.summary?.profit_rate < 0 }">
-              {{ formatPercent(portfolioAnalysis.summary?.profit_rate) }}
-            </div>
-          </div>
-          <div class="summary-item">
-            <div class="summary-label">账户仓位</div>
-            <div class="summary-value">{{ portfolioAnalysis.summary?.position_ratio?.toFixed(1) }}%</div>
-          </div>
-        </div>
-        <!-- 分析内容 -->
-        <el-scrollbar height="400px" class="analysis-content">
-          <div class="markdown-body" v-html="renderMarkdown(portfolioAnalysis.analysis)"></div>
-        </el-scrollbar>
-      </div>
-    </el-dialog>
+    <AIAnalysisDialog
+      v-model="showAnalysisDialog"
+      :loading="portfolioLoading"
+      :analysis="portfolioAnalysis"
+      @refresh="refreshPortfolioAnalysis"
+    />
   </el-container>
 </template>
 

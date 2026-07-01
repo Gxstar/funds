@@ -1,8 +1,7 @@
 """工具函数"""
-from datetime import datetime, date
+from datetime import datetime, date, time
 from decimal import Decimal
-from typing import Optional, Any
-import json
+from typing import Optional
 import os
 from pathlib import Path
 
@@ -157,57 +156,36 @@ def set_total_position_amount(amount: Decimal) -> None:
     set_setting("total_position_amount", str(amount))
 
 
-def format_decimal(value: Decimal, places: int = 2) -> str:
-    """格式化小数"""
-    return f"{value:.{places}f}"
+# === 交易时间工具 ===
+
+TRADING_MORNING = (time(9, 30), time(11, 30))
+TRADING_AFTERNOON = (time(13, 0), time(15, 0))
+TRADING_SESSIONS = [TRADING_MORNING, TRADING_AFTERNOON]
 
 
-def format_currency(value: Decimal) -> str:
-    """格式化货币"""
-    return f"¥{value:,.2f}"
+def is_trading_day(d: date = None) -> bool:
+    """判断是否 A 股交易日（简化：周一至周五，不含法定节假日）"""
+    d = d or date.today()
+    return d.weekday() < 5
 
 
-def format_percent(value: Decimal) -> str:
-    """格式化百分比"""
-    sign = "+" if value > 0 else ""
-    return f"{sign}{value:.2f}%"
+def is_market_open(dt: datetime = None) -> bool:
+    """判断当前是否在交易时段内"""
+    dt = dt or datetime.now()
+    if not is_trading_day(dt.date()):
+        return False
+    t = dt.time()
+    return any(start <= t <= end for start, end in TRADING_SESSIONS)
 
 
-def parse_date(date_str: str) -> Optional[date]:
-    """解析日期字符串"""
-    if not date_str:
-        return None
-    for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"]:
-        try:
-            return datetime.strptime(date_str, fmt).date()
-        except ValueError:
-            continue
-    return None
+def is_after_market_close(dt: datetime = None) -> bool:
+    """判断是否已收盘（15:00 之后）"""
+    dt = dt or datetime.now()
+    return dt.time() > TRADING_AFTERNOON[1]
 
 
-def calculate_profit(
-    shares: Decimal,
-    cost_price: Decimal,
-    current_price: Decimal
-) -> tuple[Decimal, Decimal]:
-    """计算盈亏
-    返回: (盈亏金额, 盈亏比例)
-    """
-    cost = shares * cost_price
-    current_value = shares * current_price
-    profit = current_value - cost
-    profit_rate = (profit / cost * 100) if cost else Decimal("0")
-    return profit, profit_rate
-
-
-def get_trade_days(start_date: date, end_date: date) -> list[date]:
-    """获取交易日期列表（简化版，不含节假日判断）"""
-    from datetime import timedelta
-    days = []
-    current = start_date
-    while current <= end_date:
-        # 跳过周末
-        if current.weekday() < 5:
-            days.append(current)
-        current += timedelta(days=1)
-    return days
+def trading_session_ttl(day_ttl: float = 300, after_hours_ttl: float = 3600) -> float:
+    """根据当前时间返回合适的 TTL：盘内短，盘后长"""
+    if is_market_open():
+        return day_ttl
+    return after_hours_ttl

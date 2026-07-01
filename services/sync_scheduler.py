@@ -89,9 +89,7 @@ class SyncScheduler:
                 except Exception as e:
                     logger.error(f"同步基金 {fund['fund_code']} 失败: {e}")
                     results.append({"fund_code": fund["fund_code"], "status": "failed", "error": str(e)})
-                
-                # 限流
-                await asyncio.sleep(1.5)
+
             
             logger.info("所有基金同步完成")
             return results

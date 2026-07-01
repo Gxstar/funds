@@ -131,54 +131,26 @@ class AICache:
     def save_cache(fund_code: str, analysis: str, analysis_type: str = "fund", 
                    indicators: dict = None, risk_metrics: dict = None) -> None:
         """保存分析结果到缓存（始终只保存最新的一条）"""
-        import traceback
-        conn = None
+        now = datetime.now()
         try:
-            from database.connection import get_db
-            now = datetime.now()
-            
-            conn = get_db()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO ai_analysis (fund_code, analysis_type, analysis, indicators, risk_metrics, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (fund_code, analysis_type) 
-                DO UPDATE SET 
-                    analysis = EXCLUDED.analysis,
-                    indicators = EXCLUDED.indicators,
-                    risk_metrics = EXCLUDED.risk_metrics,
-                    created_at = EXCLUDED.created_at
-            """, (fund_code, analysis_type, analysis, 
-                  json.dumps(indicators) if indicators else None,
-                  json.dumps(risk_metrics) if risk_metrics else None,
-                  now))
-            conn.commit()
-            
-            # 验证数据是否真的保存了
-            cursor.execute("""
-                SELECT id FROM ai_analysis WHERE fund_code = %s AND analysis_type = %s
-            """, (fund_code, analysis_type))
-            row = cursor.fetchone()
-            if row:
-                logger.info(f"已保存AI缓存并验证成功: {fund_code}, id={row.get('id')}")
-            else:
-                logger.error(f"保存AI缓存验证失败: {fund_code}，数据未写入")
-                raise Exception("数据保存验证失败")
+            with get_db_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO ai_analysis (fund_code, analysis_type, analysis, indicators, risk_metrics, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (fund_code, analysis_type) 
+                    DO UPDATE SET 
+                        analysis = EXCLUDED.analysis,
+                        indicators = EXCLUDED.indicators,
+                        risk_metrics = EXCLUDED.risk_metrics,
+                        created_at = EXCLUDED.created_at
+                """, (fund_code, analysis_type, analysis, 
+                      json.dumps(indicators) if indicators else None,
+                      json.dumps(risk_metrics) if risk_metrics else None,
+                      now))
         except Exception as e:
             logger.error(f"保存AI缓存失败: {e}")
-            logger.error(f"异常详情: {traceback.format_exc()}")
-            if conn:
-                try:
-                    conn.rollback()
-                except:
-                    pass
             raise
-        finally:
-            if conn:
-                try:
-                    conn.close()
-                except:
-                    pass
     
     @staticmethod
     def clear_cache(fund_code: str, analysis_type: str = "fund") -> None:
@@ -380,6 +352,8 @@ class AIService:
         
         # 获取基金数据
         from services.fund_service import FundService
+        from services.holding_service import HoldingService
+        from services.trade_service import TradeService
         from services.market_service import MarketService
         from services.market_sentiment_service import MarketSentimentService
         from services.fund_detail_service import FundDetailService
@@ -428,7 +402,7 @@ class AIService:
                 logger.warning(f"计算风险指标失败: {e}")
         
         # 持仓信息
-        holding = FundService.get_holding(fund_code)
+        holding = HoldingService.get_holding(fund_code)
         if holding:
             shares = Decimal(str(holding["total_shares"]))
             cost_price = Decimal(str(holding["cost_price"]))
@@ -449,7 +423,7 @@ class AIService:
         total_position = get_total_position_amount()
         if total_position > 0:
             # 获取总市值
-            summary = FundService.get_holdings_summary()
+            summary = HoldingService.get_holdings_summary()
             total_market_value = Decimal(str(summary.get("total_market_value", 0)))
             position_ratio = float(total_market_value / total_position * 100) if total_position else 0
             available = total_position - total_market_value
@@ -544,7 +518,7 @@ class AIService:
         
         # 获取用户交易历史（近10笔）
         try:
-            trades = FundService.get_trades(fund_code, limit=10)
+            trades = TradeService.get_trades(fund_code, limit=10)
             if trades:
                 trade_list = []
                 for t in trades:
@@ -686,6 +660,8 @@ class AIService:
             cache_only: 只获取缓存，没有缓存时返回空
         """
         from services.fund_service import FundService
+        from services.holding_service import HoldingService
+        from services.trade_service import TradeService
         from services.market_service import MarketService
         
         # 如果不是强制刷新，先尝试获取缓存 (max_age_hours=0 表示永不过期)
@@ -715,7 +691,7 @@ class AIService:
             }
         
         # 获取所有持仓汇总
-        holdings_summary = FundService.get_holdings_summary()
+        holdings_summary = HoldingService.get_holdings_summary()
         
         if holdings_summary["fund_count"] == 0:
             return {
@@ -848,7 +824,7 @@ class AIService:
         
         # 获取账户交易历史汇总（近20笔）
         try:
-            all_trades = FundService.get_trades(limit=20)
+            all_trades = TradeService.get_trades(limit=20)
             if all_trades:
                 # 统计买入卖出情况
                 buy_count = sum(1 for t in all_trades if t["trade_type"] == "BUY")

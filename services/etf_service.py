@@ -1,119 +1,18 @@
 """ETF 实时行情服务"""
-from datetime import datetime, date, time as dt_time
+from datetime import datetime, date
 from typing import Optional, List, Dict
 import logging
 import re
 import asyncio
-from threading import Lock
+
+from utils.cache import TTLCache
+from utils.helpers import is_market_open
 
 logger = logging.getLogger(__name__)
 
-
-class ETFCache:
-    """ETF 数据缓存管理器 - 智能缓存策略
-    
-    交易时间内(9:30-15:00): 5分钟缓存（ETF作为参考需要较新数据）
-    收盘后(15:00后): 当日数据一直有效（收盘后数据不会变化）
-    """
-    
-    # A股交易时间段
-    MARKET_OPEN_TIME = dt_time(9, 30)
-    MARKET_CLOSE_TIME = dt_time(15, 0)
-    
-    def __init__(self):
-        self._cache: Dict[str, dict] = {}  # {etf_code: {data, timestamp, type}}
-        self._lock = Lock()
-        
-        # 缓存有效期配置（秒）
-        self.TRADING_CACHE_TTL = 300  # 交易时间内：5分钟
-        self.AFTER_MARKET_TTL = 3600  # 收盘后：1小时（实际会用日期判断）
-    
-    def _is_trading_time(self) -> bool:
-        """判断当前是否在A股交易时间段内 (9:30-15:00)"""
-        now = datetime.now()
-        current_time = now.time()
-        weekday = now.weekday()
-        
-        if weekday >= 5:  # 周末
-            return False
-        
-        return self.MARKET_OPEN_TIME <= current_time <= self.MARKET_CLOSE_TIME
-    
-    def _is_after_market_close(self) -> bool:
-        """判断当前是否已收盘 (15:00 后)"""
-        now = datetime.now()
-        current_time = now.time()
-        weekday = now.weekday()
-        
-        if weekday >= 5:
-            return True  # 周末视为收盘后
-        
-        return current_time >= self.MARKET_CLOSE_TIME
-    
-    def _get_cache_ttl(self) -> int:
-        """根据交易状态动态获取缓存TTL"""
-        if self._is_trading_time():
-            return self.TRADING_CACHE_TTL
-        else:
-            return self.AFTER_MARKET_TTL
-    
-    def get(self, etf_code: str, data_type: str = 'realtime') -> Optional[dict]:
-        """获取缓存数据（智能缓存策略）"""
-        with self._lock:
-            key = f"{etf_code}_{data_type}"
-            if key not in self._cache:
-                return None
-            
-            cached = self._cache[key]
-            now = datetime.now()
-            age = (now - cached['timestamp']).total_seconds()
-            
-            # 智能缓存策略
-            if self._is_after_market_close():
-                # 收盘后：检查是否是同一天的数据
-                cache_date = cached['timestamp'].date()
-                today = now.date()
-                if cache_date == today:
-                    logger.debug(f"收盘后缓存命中: {key}, 日期相同")
-                    result = cached['data'].copy()
-                    result['cached_at'] = cached['timestamp'].isoformat()
-                    return result
-                else:
-                    logger.debug(f"收盘后缓存过期: {key}, 缓存日期={cache_date}, 今日={today}")
-                    return None
-            else:
-                # 交易时间内或开盘前：使用动态TTL
-                ttl = self._get_cache_ttl()
-                if age < ttl:
-                    logger.debug(f"缓存命中: {key}, 年龄: {age:.0f}秒, TTL: {ttl}秒")
-                    result = cached['data'].copy()
-                    result['cached_at'] = cached['timestamp'].isoformat()
-                    return result
-            
-            return None
-    
-    def set(self, etf_code: str, data: dict, data_type: str = 'realtime'):
-        """设置缓存数据"""
-        with self._lock:
-            key = f"{etf_code}_{data_type}"
-            self._cache[key] = {
-                'data': data,
-                'timestamp': datetime.now(),
-                'type': data_type
-            }
-            logger.debug(f"缓存已更新: {key}")
-    
-    def get_cache_time(self, etf_code: str, data_type: str = 'realtime') -> Optional[datetime]:
-        """获取缓存时间"""
-        with self._lock:
-            key = f"{etf_code}_{data_type}"
-            if key in self._cache:
-                return self._cache[key]['timestamp']
-            return None
-
-
-# 全局缓存实例
-etf_cache = ETFCache()
+# 全局缓存
+_realtime_cache = TTLCache(ttl=300)    # 盘中 5 分钟
+_money_flow_cache = TTLCache(ttl=600)  # 盘中 10 分钟
 
 
 class ETFService:
@@ -233,7 +132,7 @@ class ETFService:
                     "volume": volume,
                     "amount": 0,  # 腾讯接口不直接提供成交额
                     "update_time": datetime.now().isoformat(),
-                    "is_trading": ETFService._is_trading_time()
+                    "is_trading": is_market_open()
                 }
                 
         except Exception as e:
@@ -245,16 +144,15 @@ class ETFService:
         """获取 ETF 实时行情（优先腾讯接口，备用东方财富）"""
         # 检查缓存
         if use_cache:
-            cached = etf_cache.get(etf_code, 'realtime')
+            cached = _realtime_cache.get()
             if cached:
                 return cached
         
         # 优先使用腾讯接口
         result = await ETFService.get_etf_realtime_tencent(etf_code)
         if result:
-            etf_cache.set(etf_code, result, 'realtime')
-            # 添加缓存时间
             result['cached_at'] = datetime.now().isoformat()
+            _realtime_cache.set(result)
             return result
         
         # 腾讯接口失败，尝试东方财富
@@ -300,10 +198,11 @@ class ETFService:
                 "volume": volume,
                 "amount": amount,
                 "update_time": datetime.now().isoformat(),
-                "is_trading": ETFService._is_trading_time()
+                "is_trading": is_market_open()
             }
             
-            etf_cache.set(etf_code, result, 'realtime')
+            result['cached_at'] = datetime.now().isoformat()
+            _realtime_cache.set(result)
             return result
             
         except Exception as e:
@@ -348,7 +247,7 @@ class ETFService:
         """获取 ETF 资金流向"""
         # 检查缓存
         if use_cache:
-            cached = etf_cache.get(etf_code, 'money_flow')
+            cached = _money_flow_cache.get()
             if cached:
                 return cached
         
@@ -379,7 +278,7 @@ class ETFService:
                 "date": str(latest.get('日期', '')) if '日期' in latest else ''
             }
             
-            etf_cache.set(etf_code, result, 'money_flow')
+            _money_flow_cache.set(result)
             return result
             
         except Exception as e:
@@ -410,22 +309,4 @@ class ETFService:
         
         return result
     
-    @staticmethod
-    def _is_trading_time() -> bool:
-        """判断是否在交易时间"""
-        now = datetime.now()
-        current_time = now.time()
-        
-        # 工作日
-        if now.weekday() >= 5:  # 周六日
-            return False
-        
-        # 交易时间段: 9:30-11:30, 13:00-15:00
-        from datetime import time
-        morning_start = time(9, 30)
-        morning_end = time(11, 30)
-        afternoon_start = time(13, 0)
-        afternoon_end = time(15, 0)
-        
-        return (morning_start <= current_time <= morning_end or 
-                afternoon_start <= current_time <= afternoon_end)
+

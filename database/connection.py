@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 # 加载 .env 文件
 load_dotenv()
 
-# 数据库类型
-DB_TYPE = os.getenv("DB_TYPE", "postgresql").lower()
+# 数据库类型（默认 SQLite，零配置启动）
+DB_TYPE = os.getenv("DB_TYPE", "sqlite").lower()
 
 # SQLite 配置
 SQLITE_PATH = os.getenv("SQLITE_PATH", "data/funds.db")
@@ -27,7 +27,7 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 def get_db():
     """获取数据库连接（支持 SQLite 和 PostgreSQL）"""
     # 每次调用时重新读取环境变量，确保配置更新后无需重启服务
-    db_type = os.getenv("DB_TYPE", "postgresql").lower()
+    db_type = os.getenv("DB_TYPE", "sqlite").lower()
     
     if db_type == "sqlite":
         # 从环境变量读取配置（确保使用最新值）
@@ -84,7 +84,7 @@ def get_db_context() -> Generator:
 def init_db() -> None:
     """初始化数据库表结构（支持 SQLite 和 PostgreSQL）"""
     # 重新读取环境变量
-    db_type = os.getenv("DB_TYPE", "postgresql").lower()
+    db_type = os.getenv("DB_TYPE", "sqlite").lower()
     
     with get_db_context() as conn:
         cursor = conn.cursor()

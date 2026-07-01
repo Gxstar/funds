@@ -1,10 +1,11 @@
 """市场情绪服务 - 使用 akshare 获取数据"""
-from datetime import datetime, date, time, timedelta
+from datetime import datetime
 from typing import Optional, Dict
 import logging
-import threading
 import asyncio
 import httpx
+
+from utils.cache import TTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -13,92 +14,8 @@ REQUEST_TIMEOUT = 15
 MAX_RETRIES = 3
 RETRY_DELAY = 1  # 秒
 
-# A股交易时间段
-MARKET_OPEN_TIME = time(9, 30)
-MARKET_CLOSE_TIME = time(15, 0)
-# 盘中缓存有效期（秒）
-TRADING_CACHE_TTL = 300  # 5分钟
-
-
-class MarketSentimentCache:
-    """市场情绪数据缓存 - 智能缓存策略"""
-    
-    def __init__(self):
-        self._data: Dict = {}
-        self._timestamp: Optional[datetime] = None
-        self._lock = threading.Lock()
-    
-    def _is_trading_time(self) -> bool:
-        """判断当前是否在A股交易时间段内"""
-        now = datetime.now()
-        current_time = now.time()
-        weekday = now.weekday()
-        
-        if weekday >= 5:  # 周末
-            return False
-        
-        return MARKET_OPEN_TIME <= current_time <= MARKET_CLOSE_TIME
-    
-    def _is_after_market_close(self) -> bool:
-        """判断当前是否已收盘"""
-        now = datetime.now()
-        current_time = now.time()
-        weekday = now.weekday()
-        
-        if weekday >= 5:
-            return True
-        
-        return current_time >= MARKET_CLOSE_TIME
-    
-    def _get_cache_ttl(self) -> int:
-        """根据时间段动态获取缓存TTL"""
-        if self._is_trading_time():
-            # 交易时间内，短缓存
-            return TRADING_CACHE_TTL
-        else:
-            # 收盘后或开盘前，使用较长缓存
-            # 实际会在 get() 中通过日期判断
-            return 3600  # 1小时（兜底值）
-    
-    def get(self) -> Optional[Dict]:
-        """获取缓存数据（智能缓存策略）"""
-        with self._lock:
-            if not self._data or not self._timestamp:
-                return None
-            
-            now = datetime.now()
-            
-            # 收盘后：检查是否是同一天的数据
-            if self._is_after_market_close():
-                cache_date = self._timestamp.date()
-                today = now.date()
-                if cache_date == today:
-                    return self._data
-                else:
-                    return None
-            
-            # 交易时间内或开盘前：使用动态TTL
-            ttl = self._get_cache_ttl()
-            age = (now - self._timestamp).total_seconds()
-            
-            if age < ttl:
-                return self._data
-            return None
-    
-    def set(self, data: Dict):
-        with self._lock:
-            self._data = data
-            self._timestamp = datetime.now()
-    
-    def clear(self):
-        """清除缓存"""
-        with self._lock:
-            self._data = {}
-            self._timestamp = None
-
-
 # 全局缓存实例
-sentiment_cache = MarketSentimentCache()
+sentiment_cache = TTLCache(ttl=600)
 
 
 class MarketSentimentService:

@@ -1,12 +1,14 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Search, MagicStick } from '@element-plus/icons-vue'
 import { useFundStore } from '@/stores/funds'
+import { useHoldingStore } from '@/stores/holdings'
 import { formatCurrency, formatPercent } from '@/utils/format'
 
 const router = useRouter()
 const fundStore = useFundStore()
+const holdingStore = useHoldingStore()
 
 // Props
 const props = defineProps({
@@ -90,29 +92,29 @@ function selectFund(fund) {
       <div class="summary-body">
         <div class="summary-main">
           <div class="summary-label">总市值</div>
-          <div class="summary-value">{{ formatCurrency(fundStore.holdingsSummary.total_market_value) }}</div>
+          <div class="summary-value">{{ formatCurrency(holdingStore.holdingsSummary.total_market_value) }}</div>
         </div>
         <div class="summary-grid">
           <div class="summary-item">
             <span class="label">投入</span>
-            <span class="value">{{ formatCurrency(fundStore.holdingsSummary.total_cost) }}</span>
+            <span class="value">{{ formatCurrency(holdingStore.holdingsSummary.total_cost) }}</span>
           </div>
           <div class="summary-item">
             <span class="label">盈亏</span>
-            <span class="value" :class="{ profit: fundStore.holdingsSummary.total_profit > 0, loss: fundStore.holdingsSummary.total_profit < 0 }">
-              {{ formatCurrency(fundStore.holdingsSummary.total_profit) }}
+            <span class="value" :class="{ profit: holdingStore.holdingsSummary.total_profit > 0, loss: holdingStore.holdingsSummary.total_profit < 0 }">
+              {{ formatCurrency(holdingStore.holdingsSummary.total_profit) }}
             </span>
           </div>
           <div class="summary-item">
             <span class="label">当日收益</span>
-            <span class="value" :class="{ profit: fundStore.holdingsSummary.today_profit > 0, loss: fundStore.holdingsSummary.today_profit < 0 }">
-              {{ (fundStore.holdingsSummary.today_profit > 0 ? '+' : '') + formatCurrency(fundStore.holdingsSummary.today_profit).slice(1) }}
+            <span class="value" :class="{ profit: holdingStore.holdingsSummary.today_profit > 0, loss: holdingStore.holdingsSummary.today_profit < 0 }">
+              {{ (holdingStore.holdingsSummary.today_profit > 0 ? '+' : '') + formatCurrency(holdingStore.holdingsSummary.today_profit).slice(1) }}
             </span>
           </div>
           <div class="summary-item">
             <span class="label">收益率</span>
-            <span class="value" :class="{ profit: fundStore.holdingsSummary.profit_rate > 0, loss: fundStore.holdingsSummary.profit_rate < 0 }">
-              {{ formatPercent(fundStore.holdingsSummary.profit_rate) }}
+            <span class="value" :class="{ profit: holdingStore.holdingsSummary.profit_rate > 0, loss: holdingStore.holdingsSummary.profit_rate < 0 }">
+              {{ formatPercent(holdingStore.holdingsSummary.profit_rate) }}
             </span>
           </div>
         </div>

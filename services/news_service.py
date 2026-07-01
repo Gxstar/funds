@@ -2,38 +2,13 @@
 from datetime import datetime
 from typing import Optional, List, Dict
 import logging
-from threading import Lock
+
+from utils.cache import TTLCache
 
 logger = logging.getLogger(__name__)
 
-
-class NewsCache:
-    """新闻缓存管理器"""
-    
-    def __init__(self):
-        self._cache: Dict[str, dict] = {}
-        self._lock = Lock()
-        self.CACHE_TTL = 1800  # 30 分钟缓存
-    
-    def get(self, key: str) -> Optional[List[dict]]:
-        with self._lock:
-            if key not in self._cache:
-                return None
-            cached = self._cache[key]
-            age = (datetime.now() - cached["timestamp"]).total_seconds()
-            if age < self.CACHE_TTL:
-                return cached["data"]
-            return None
-    
-    def set(self, key: str, data: List[dict]):
-        with self._lock:
-            self._cache[key] = {
-                "data": data,
-                "timestamp": datetime.now()
-            }
-
-
-news_cache = NewsCache()
+# 全局缓存（TTL 10 分钟，由 trading_session_ttl 决定）
+news_cache = TTLCache(ttl=600)
 
 
 class NewsService:
@@ -89,8 +64,7 @@ class NewsService:
     @staticmethod
     async def fetch_news_by_keyword(keyword: str, max_count: int = 5) -> List[dict]:
         """根据关键词获取新闻"""
-        cache_key = f"news_{keyword}"
-        cached = news_cache.get(cache_key)
+        cached = news_cache.get()
         if cached:
             return cached
         
@@ -112,7 +86,7 @@ class NewsService:
                     "url": row.get("新闻链接", ""),
                 })
             
-            news_cache.set(cache_key, news_list)
+            news_cache.set(news_list)
             return news_list
             
         except Exception as e:

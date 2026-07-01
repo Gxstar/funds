@@ -1,39 +1,15 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import { fundAPI, holdingAPI, tradeAPI, marketAPI, etfAPI, aiAPI } from '@/api'
+import { ref } from 'vue'
+import { fundAPI, marketAPI, holdingAPI, tradeAPI } from '@/api'
+import { useChartStore } from '@/stores/chart'
+import { useHoldingStore } from '@/stores/holdings'
 
 export const useFundStore = defineStore('fund', () => {
-  // 状态
   const funds = ref([])
   const currentFund = ref(null)
-  const holdingsSummary = ref({
-    total_cost: 0,
-    total_market_value: 0,
-    total_profit: 0,
-    profit_rate: 0,
-    today_profit: 0,
-    fund_count: 0
-  })
   const loading = ref(false)
   const showAddDialog = ref(false)
-  const chartData = ref(null)
-  const etfData = ref(null)
-  const recentTrades = ref([])
-  const aiAnalysis = ref(null)
-  const aiLoading = ref(false)
-  const aiSettings = ref({
-    api_key_configured: false,
-    deepseek_base_url: '',
-    deepseek_model: 'deepseek-chat',
-    total_position_amount: '0'
-  })
 
-  // 计算属性
-  const hasHoldingFunds = computed(() => 
-    funds.value.filter(f => f.total_shares && parseFloat(f.total_shares) > 0)
-  )
-
-  // 加载基金列表
   async function loadFunds() {
     loading.value = true
     try {
@@ -47,37 +23,26 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
-  // 加载持仓汇总
-  async function loadHoldingsSummary() {
-    try {
-      holdingsSummary.value = await holdingAPI.getSummary()
-    } catch (error) {
-      console.error('加载持仓汇总失败:', error)
-    }
-  }
-
-  // 选择基金并加载详情
   async function selectFund(code) {
     loading.value = true
     try {
-      // 先同步最新净值数据
       try {
         await marketAPI.sync(code)
       } catch (syncErr) {
         console.log('同步净值失败，使用缓存数据:', syncErr)
       }
-      
-      // 然后加载基金数据
+
       const fund = await fundAPI.get(code)
       currentFund.value = fund
-      
-      // 并行加载图表数据和交易预览
+
+      const chartStore = useChartStore()
+      const holdingStore = useHoldingStore()
       await Promise.all([
-        loadChartData(code, '1y'),
-        loadTradePreview(code),
-        loadETFData(fund.related_etf)
+        chartStore.loadChartData(code, '1y'),
+        holdingStore.loadTradePreview(code),
+        chartStore.loadETFData(fund.related_etf)
       ])
-      
+
       return fund
     } catch (error) {
       console.error('加载基金详情失败:', error)
@@ -87,63 +52,6 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
-  // 加载图表数据
-  async function loadChartData(code, period = '1y') {
-    try {
-      chartData.value = await marketAPI.getChart(code, period)
-    } catch (error) {
-      console.error('加载图表数据失败:', error)
-    }
-  }
-
-  // 加载交易预览
-  async function loadTradePreview(code) {
-    try {
-      const result = await tradeAPI.getAll(code, 5)
-      recentTrades.value = result.data || []
-    } catch (error) {
-      console.error('加载交易记录失败:', error)
-    }
-  }
-
-  // 加载所有近期交易（首页用）
-  async function loadRecentTrades(limit = 10) {
-    try {
-      const result = await tradeAPI.getAll(null, limit)
-      recentTrades.value = result.data || []
-    } catch (error) {
-      console.error('加载近期交易失败:', error)
-    }
-  }
-
-  // 加载 ETF 数据
-  async function loadETFData(etfCode) {
-    if (!etfCode) {
-      etfData.value = null
-      return
-    }
-    try {
-      etfData.value = await etfAPI.getAnalysis(etfCode)
-    } catch (error) {
-      console.error('加载 ETF 数据失败:', error)
-      etfData.value = null
-    }
-  }
-
-  // 刷新 ETF 数据（强制更新缓存）
-  async function refreshETFData(etfCode) {
-    if (!etfCode) {
-      return
-    }
-    try {
-      etfData.value = await etfAPI.getAnalysis(etfCode, true)
-    } catch (error) {
-      console.error('刷新 ETF 数据失败:', error)
-      throw error
-    }
-  }
-
-  // 添加基金
   async function addFund(data) {
     try {
       await fundAPI.add(data)
@@ -155,20 +63,18 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
-  // 删除基金
   async function deleteFund(code) {
     try {
       await fundAPI.delete(code)
       currentFund.value = null
       await loadFunds()
-      await loadHoldingsSummary()
+      await useHoldingStore().loadHoldingsSummary()
     } catch (error) {
       console.error('删除基金失败:', error)
       throw error
     }
   }
 
-  // 搜索基金
   async function searchFunds(keyword) {
     try {
       const result = await fundAPI.search(keyword)
@@ -179,13 +85,12 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
-  // 设置关联 ETF
   async function setRelatedETF(code, etfCode) {
     try {
       await fundAPI.update(code, { related_etf: etfCode || null })
       if (currentFund.value?.fund_code === code) {
         currentFund.value.related_etf = etfCode
-        await loadETFData(etfCode)
+        await useChartStore().loadETFData(etfCode)
       }
     } catch (error) {
       console.error('设置 ETF 失败:', error)
@@ -193,11 +98,10 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
-  // 更新持仓
   async function updateHolding(code, data) {
     try {
       await holdingAPI.update(code, data)
-      await loadHoldingsSummary()
+      await useHoldingStore().loadHoldingsSummary()
       if (currentFund.value?.fund_code === code) {
         await selectFund(code)
       }
@@ -207,12 +111,11 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
-  // 添加交易
   async function addTrade(data) {
     try {
       await tradeAPI.add(data)
       await tradeAPI.recalculate(data.fund_code)
-      await loadHoldingsSummary()
+      await useHoldingStore().loadHoldingsSummary()
       if (currentFund.value?.fund_code === data.fund_code) {
         await selectFund(data.fund_code)
       }
@@ -222,7 +125,6 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
-  // 更新交易
   async function updateTrade(id, data) {
     try {
       await tradeAPI.update(id, data)
@@ -236,12 +138,11 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
-  // 删除交易
   async function deleteTrade(id, fundCode) {
     try {
       await tradeAPI.delete(id)
       await tradeAPI.recalculate(fundCode)
-      await loadHoldingsSummary()
+      await useHoldingStore().loadHoldingsSummary()
       if (currentFund.value?.fund_code === fundCode) {
         await selectFund(fundCode)
       }
@@ -251,56 +152,37 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
-  // 获取 AI 建议（强制刷新时重新分析，否则返回缓存）
-  async function getAISuggestion(code, forceRefresh = false) {
-    aiLoading.value = true
-    if (forceRefresh) {
-      aiAnalysis.value = null
-    }
+  async function syncAll() {
     try {
-      // forceRefresh=false 时优先返回缓存，没有缓存返回 no_cache
-      // forceRefresh=true 时强制重新分析并更新数据库
-      const result = await aiAPI.suggest(code, forceRefresh, false)
-      if (result.error) {
-        throw new Error(result.error)
-      }
-      aiAnalysis.value = result
-      return result
-    } catch (error) {
-      console.error('AI 分析失败:', error)
-      throw error
-    } finally {
-      aiLoading.value = false
+      return await marketAPI.syncAll()
+    } catch (e) {
+      console.error('全量同步失败:', e)
+      throw e
     }
   }
 
-  // 清空 AI 分析结果
-  function clearAIAnalysis() {
-    aiAnalysis.value = null
-  }
-
-  // 加载 AI 缓存（只在有缓存时加载，不自动分析）
-  async function loadAICache(code) {
+  async function syncFundData(code) {
     try {
-      // cacheOnly=true：只获取缓存，没有缓存时返回 no_cache，不会触发新分析
-      const result = await aiAPI.suggest(code, false, true)
-      if (result && !result.error && !result.no_cache) {
-        aiAnalysis.value = result
-      } else {
-        aiAnalysis.value = null
-      }
-    } catch (error) {
-      // 静默失败，不影响页面加载
-      console.log('AI缓存加载失败:', error)
+      return await marketAPI.sync(code)
+    } catch (e) {
+      console.error('同步基金数据失败:', e)
+      throw e
     }
   }
 
-  // 刷新所有数据
+  async function loadIndices(skipCache = false) {
+    try {
+      return await marketAPI.getIndices(skipCache)
+    } catch (e) {
+      console.error('加载市场指数失败:', e)
+      return { data: [], date: '', is_today: true, update_time: '' }
+    }
+  }
+
   async function refreshAll() {
     try {
-      await marketAPI.syncAll()
-      
-      // 同时刷新所有基金的基本信息（包括风险等级）
+      await syncAll()
+
       for (const fund of funds.value) {
         try {
           await fundAPI.refreshInfo(fund.fund_code)
@@ -308,9 +190,9 @@ export const useFundStore = defineStore('fund', () => {
           console.log(`刷新基金 ${fund.fund_code} 信息失败:`, e)
         }
       }
-      
+
       await loadFunds()
-      await loadHoldingsSummary()
+      await useHoldingStore().loadHoldingsSummary()
       if (currentFund.value) {
         await selectFund(currentFund.value.fund_code)
       }
@@ -320,53 +202,10 @@ export const useFundStore = defineStore('fund', () => {
     }
   }
 
-  // 加载 AI 设置
-  async function loadAISettings() {
-    try {
-      const settings = await aiAPI.getSettings()
-      aiSettings.value = settings
-      return settings
-    } catch (error) {
-      console.error('加载 AI 设置失败:', error)
-    }
-  }
-
   return {
-    // 状态
-    funds,
-    currentFund,
-    holdingsSummary,
-    loading,
-    showAddDialog,
-    chartData,
-    etfData,
-    recentTrades,
-    aiAnalysis,
-    aiLoading,
-    aiSettings,
-    // 计算属性
-    hasHoldingFunds,
-    // 方法
-    loadFunds,
-    loadHoldingsSummary,
-    selectFund,
-    loadChartData,
-    loadTradePreview,
-    loadRecentTrades,
-    loadETFData,
-    refreshETFData,
-    addFund,
-    deleteFund,
-    searchFunds,
-    setRelatedETF,
-    updateHolding,
-    addTrade,
-    updateTrade,
-    deleteTrade,
-    getAISuggestion,
-    clearAIAnalysis,
-    loadAICache,
-    refreshAll,
-    loadAISettings
+    funds, currentFund, loading, showAddDialog,
+    loadFunds, selectFund, addFund, deleteFund, searchFunds,
+    setRelatedETF, updateHolding, addTrade, updateTrade, deleteTrade,
+    refreshAll, syncAll, syncFundData, loadIndices
   }
 })

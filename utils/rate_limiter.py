@@ -30,13 +30,12 @@ class RateLimiter:
     
     async def acquire_async(self) -> None:
         """获取请求许可，必要时等待（异步版本）"""
-        now = time.time()
-        wait_time = self.min_interval - (now - self.last_request_time)
-        if wait_time > 0:
-            await asyncio.sleep(wait_time)
-        
         with self._lock:
-            self.last_request_time = time.time()
+            now = time.monotonic()
+            wait_time = self.min_interval - (now - self.last_request_time)
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+            self.last_request_time = time.monotonic()
 
 
 # 全局 AkShare 限流器实例（1.5 秒间隔）

@@ -155,25 +155,3 @@ class Setting:
         )
 
 
-@dataclass
-class AIAnalysis:
-    """AI 分析缓存"""
-    id: Optional[int] = None
-    fund_code: str = ""
-    analysis_type: str = "fund"  # fund / portfolio
-    analysis: str = ""
-    indicators: Optional[dict] = None
-    risk_metrics: Optional[dict] = None
-    created_at: Optional[datetime] = None
-    
-    @classmethod
-    def from_row(cls, row: dict) -> "AIAnalysis":
-        return cls(
-            id=row.get("id"),
-            fund_code=row.get("fund_code", ""),
-            analysis_type=row.get("analysis_type", "fund"),
-            analysis=row.get("analysis", ""),
-            indicators=row.get("indicators"),
-            risk_metrics=row.get("risk_metrics"),
-            created_at=row.get("created_at"),
-        )

@@ -2,39 +2,13 @@
 from datetime import datetime
 from typing import Optional, Dict
 import logging
-import threading
+
+from utils.cache import TTLCache
 
 logger = logging.getLogger(__name__)
 
-
-class FundDetailCache:
-    """基金详情缓存"""
-    
-    def __init__(self):
-        self._cache: Dict[str, dict] = {}
-        self._lock = threading.Lock()
-        self.CACHE_TTL = 86400  # 24 小时缓存
-    
-    def get(self, fund_code: str) -> Optional[Dict]:
-        with self._lock:
-            if fund_code not in self._cache:
-                return None
-            cached = self._cache[fund_code]
-            age = (datetime.now() - cached['timestamp']).total_seconds()
-            if age < self.CACHE_TTL:
-                return cached['data']
-            return None
-    
-    def set(self, fund_code: str, data: Dict):
-        with self._lock:
-            self._cache[fund_code] = {
-                'data': data,
-                'timestamp': datetime.now()
-            }
-
-
 # 全局缓存实例
-fund_detail_cache = FundDetailCache()
+fund_detail_cache = TTLCache(ttl=86400)
 
 
 class FundDetailService:
@@ -77,8 +51,8 @@ class FundDetailService:
     async def get_fund_detail(fund_code: str) -> Dict:
         """获取基金详细信息（经理、规模、成立时间等）"""
         # 检查缓存
-        cached = fund_detail_cache.get(fund_code)
-        if cached:
+        cached = fund_detail_cache.get()
+        if cached and cached.get("fund_code") == fund_code:
             return cached
         
         result = {
@@ -115,7 +89,7 @@ class FundDetailService:
                 result["benchmark"] = data_dict.get('业绩比较基准')
                 
                 # 缓存结果
-                fund_detail_cache.set(fund_code, result)
+                fund_detail_cache.set(result)
                 
         except Exception as e:
             logger.error(f"获取基金详情失败 {fund_code}: {e}")

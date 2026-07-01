@@ -1,5 +1,6 @@
 """行情数据服务"""
 import asyncio
+import time
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import Optional, List, Dict
@@ -9,6 +10,21 @@ from database.connection import get_db_context
 from utils.rate_limiter import akshare_limiter
 
 logger = logging.getLogger(__name__)
+
+# 全量基金数据缓存（ak.fund_name_em 返回全部约 20000 只基金）
+_fund_name_cache = None
+_fund_name_cache_time = 0
+FUND_CACHE_TTL = 86400  # 24 小时
+
+
+def _get_fund_name_data():
+    global _fund_name_cache, _fund_name_cache_time
+    now = time.time()
+    if _fund_name_cache is None or now - _fund_name_cache_time > FUND_CACHE_TTL:
+        import akshare as ak
+        _fund_name_cache = ak.fund_name_em()
+        _fund_name_cache_time = now
+    return _fund_name_cache
 
 
 class MarketService:
@@ -129,10 +145,10 @@ class MarketService:
         try:
             import akshare as ak
             
-            akshare_limiter.acquire()
+            await akshare_limiter.acquire_async()
             
             # 获取基金列表并查找
-            df = ak.fund_name_em()
+            df = _get_fund_name_data()
             result = df[df["基金代码"] == fund_code]
             
             if not result.empty:
@@ -161,7 +177,7 @@ class MarketService:
         try:
             import akshare as ak
             
-            akshare_limiter.acquire()
+            await akshare_limiter.acquire_async()
             
             # 获取历史净值数据 (AkShare API 更新: fund -> symbol, indicator 默认值变化)
             df = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
@@ -289,9 +305,9 @@ class MarketService:
         try:
             import akshare as ak
             
-            akshare_limiter.acquire()
+            await akshare_limiter.acquire_async()
             
-            df = ak.fund_name_em()
+            df = _get_fund_name_data()
             
             # 搜索匹配
             mask = (

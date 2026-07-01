@@ -5,19 +5,20 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
-from services.fund_service import FundService
+from services.trade_service import TradeService
+from services.holding_service import HoldingService
 
 router = APIRouter(prefix="/api/trades", tags=["交易记录"])
 
 
 class TradeCreate(BaseModel):
     fund_code: str
-    trade_type: str  # BUY / SELL
-    trade_date: str  # YYYY-MM-DD 购买时间
-    confirm_date: Optional[str] = None  # YYYY-MM-DD 确认时间
-    confirm_shares: Optional[str] = None  # 确认份额
-    confirm_net_value: Optional[str] = None  # 确认净值
-    amount: str  # 金额
+    trade_type: str
+    trade_date: str
+    confirm_date: Optional[str] = None
+    confirm_shares: Optional[str] = None
+    confirm_net_value: Optional[str] = None
+    amount: str
 
 
 class TradeUpdate(BaseModel):
@@ -36,7 +37,7 @@ async def get_trades(
     offset: int = Query(default=0, ge=0)
 ):
     """获取交易记录"""
-    trades = FundService.get_trades(fund_code, limit, offset)
+    trades = TradeService.get_trades(fund_code, limit, offset)
     return {"data": trades}
 
 
@@ -44,7 +45,7 @@ async def get_trades(
 async def add_trade(trade: TradeCreate):
     """新增交易记录"""
     try:
-        result = FundService.add_trade(
+        result = TradeService.add_trade(
             fund_code=trade.fund_code,
             trade_type=trade.trade_type.upper(),
             trade_date=date.fromisoformat(trade.trade_date),
@@ -62,7 +63,7 @@ async def add_trade(trade: TradeCreate):
 async def update_trade(trade_id: int, trade: TradeUpdate):
     """更新交易记录"""
     try:
-        result = FundService.update_trade(
+        result = TradeService.update_trade(
             trade_id=trade_id,
             trade_type=trade.trade_type.upper() if trade.trade_type else None,
             trade_date=date.fromisoformat(trade.trade_date) if trade.trade_date else None,
@@ -81,7 +82,7 @@ async def update_trade(trade_id: int, trade: TradeUpdate):
 @router.delete("/{trade_id}")
 async def delete_trade(trade_id: int):
     """删除交易记录"""
-    success = FundService.delete_trade(trade_id)
+    success = TradeService.delete_trade(trade_id)
     if not success:
         raise HTTPException(status_code=404, detail="交易记录不存在")
     return {"message": "删除成功"}
@@ -90,5 +91,5 @@ async def delete_trade(trade_id: int):
 @router.post("/{fund_code}/recalculate")
 async def recalculate_after_delete(fund_code: str):
     """删除交易后重新计算持仓"""
-    result = FundService.recalculate_holding(fund_code)
+    result = HoldingService.recalculate_holding(fund_code)
     return result or {"message": "持仓已清空"}

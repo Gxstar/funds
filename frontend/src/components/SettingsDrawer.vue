@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useFundStore } from '@/stores/funds'
+import { useAIStore } from '@/stores/ai'
 import { aiAPI, settingsAPI } from '@/api'
 
 const props = defineProps(['modelValue'])
@@ -12,7 +12,7 @@ const visible = computed({
   set: (val) => emit('update:modelValue', val)
 })
 
-const fundStore = useFundStore()
+const aiStore = useAIStore()
 
 // 设置数据
 const generalSettings = ref({
@@ -160,7 +160,7 @@ async function saveAllSettings() {
     visible.value = false
     
     // 刷新设置
-    fundStore.loadAISettings()
+    aiStore.loadAISettings()
   } catch (error) {
     ElMessage.error(error.message || '保存失败')
   }

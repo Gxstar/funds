@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from database.connection import get_db_context
 from utils.rate_limiter import akshare_limiter
+from utils.helpers import is_market_open, is_after_market_close
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +56,6 @@ HK_MARKET_CLOSE_MORNING = time(12, 0)
 HK_MARKET_OPEN_AFTERNOON = time(13, 0)
 HK_MARKET_CLOSE_AFTERNOON = time(16, 0)
 
-# A股交易时间段
-MARKET_OPEN_TIME = time(9, 30)
-MARKET_CLOSE_TIME = time(15, 0)
 # 盘中缓存有效期（秒）
 TRADING_CACHE_TTL = 300  # 5分钟
 
@@ -194,14 +192,14 @@ class IndexService:
             
             indices = []
             today = date.today()
-            is_trading = IndexService._is_trading_time()
+            is_trading = is_market_open()
             
             # 1. 获取A股指数
             if zh_codes:
                 if is_trading:
                     # 交易时间内：使用实时行情接口
                     try:
-                        akshare_limiter.acquire()
+                        await akshare_limiter.acquire_async()
                         df = ak.stock_zh_index_spot_sina()
                         
                         if df is not None and not df.empty:
@@ -238,7 +236,7 @@ class IndexService:
             # 2. 获取港股指数（使用实时行情接口）
             if hk_codes:
                 try:
-                    akshare_limiter.acquire()
+                    await akshare_limiter.acquire_async()
                     hk_df = ak.stock_hk_index_spot_sina()
                     
                     if hk_df is not None and not hk_df.empty:
@@ -269,7 +267,7 @@ class IndexService:
             # 3. 获取美股指数（纳斯达克）
             if us_codes:
                 try:
-                    akshare_limiter.acquire()
+                    await akshare_limiter.acquire_async()
                     df = ak.index_us_stock_sina()
                     
                     if df is not None and not df.empty:
@@ -316,7 +314,7 @@ class IndexService:
                 continue
             info = ZH_INDEX_CODES[code]
             try:
-                akshare_limiter.acquire()
+                await akshare_limiter.acquire_async()
                 df = ak.stock_zh_index_daily(symbol=info["sina_code"])
                 
                 if df is not None and not df.empty:
@@ -341,46 +339,6 @@ class IndexService:
                 continue
         
         return indices
-    
-    @staticmethod
-    def _is_trading_time() -> bool:
-        """判断当前是否在A股交易时间段内 (9:30-15:00)"""
-        now = datetime.now()
-        current_time = now.time()
-        weekday = now.weekday()
-        
-        # 周末不交易
-        if weekday >= 5:  # 5=周六, 6=周日
-            return False
-        
-        # 检查是否在交易时间段
-        return MARKET_OPEN_TIME <= current_time <= MARKET_CLOSE_TIME
-    
-    @staticmethod
-    def _is_after_market_close() -> bool:
-        """判断当前是否已收盘 (15:00 后)"""
-        now = datetime.now()
-        current_time = now.time()
-        weekday = now.weekday()
-        
-        # 周末视为"收盘后"
-        if weekday >= 5:
-            return True
-        
-        return current_time >= MARKET_CLOSE_TIME
-    
-    @staticmethod
-    def _is_before_market_open() -> bool:
-        """判断当前是否在开盘前 (9:30 前)"""
-        now = datetime.now()
-        current_time = now.time()
-        weekday = now.weekday()
-        
-        # 周末视为"开盘前"
-        if weekday >= 5:
-            return True
-        
-        return current_time < MARKET_OPEN_TIME
     
     @staticmethod
     def _get_cache_validity(cached: Dict) -> tuple:
@@ -415,7 +373,7 @@ class IndexService:
         today = now.date()
         
         # 1. 如果是交易日盘中
-        if IndexService._is_trading_time():
+        if is_market_open():
             # 检查缓存是否是今天的数据
             if cached_date_only != today:
                 return False, "trading_time_stale"
@@ -436,7 +394,7 @@ class IndexService:
             return False, "no_update_time"
         
         # 2. 如果是交易日盘后 (15:00 后)
-        if IndexService._is_after_market_close():
+        if is_after_market_close():
             # 今天的数据就有效
             if cached_date_only == today:
                 return True, "after_market_today"
@@ -446,16 +404,15 @@ class IndexService:
             else:
                 return False, "after_market_stale"
         
-        # 3. 如果是交易日盘前 (9:30 前)
-        if IndexService._is_before_market_open():
-            # 昨天或更早的数据有效（等待开盘）
-            if cached_date_only < today:
-                return True, "before_market_valid"
-            # 今天的数据（可能是刚过零点但有夜盘数据？）也有效
-            elif cached_date_only == today:
-                return True, "before_market_today"
-            else:
-                return False, "before_market_future"
+        # 3. 如果是交易日盘前 (9:30 前) 或非交易日
+        # 昨天或更早的数据有效（等待开盘）
+        if cached_date_only < today:
+            return True, "before_market_valid"
+        # 今天的数据也有效
+        elif cached_date_only == today:
+            return True, "before_market_today"
+        else:
+            return False, "before_market_future"
         
         # 默认情况：检查是否是最近的有效交易日
         # 简单判断：如果缓存是周五的数据，周末都有效
